@@ -1,10 +1,10 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.6.2;
 
-import "openzeppelin-solidity/contracts/GSN/Context.sol";
-import "openzeppelin-solidity/contracts/access/Ownable.sol";
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
-import "openzeppelin-solidity/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/GSN/Context.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 //import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/GSN/Context.sol";
 //import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/math/SafeMath.sol";
@@ -63,7 +63,7 @@ contract ESOVToken is ERC20, Ownable {
         override
         returns (bool)
     {
-        if(onlyAllowed(msg.sender)){
+        if (onlyAllowed(msg.sender)) {
             return super.transfer(to, value);
         }
         return false;
@@ -74,13 +74,13 @@ contract ESOVToken is ERC20, Ownable {
         address recipient,
         uint256 amount
     ) public override returns (bool) {
-        if(onlyAllowed(sender)){
+        if (onlyAllowed(sender)) {
             return super.transferFrom(sender, recipient, amount);
         }
         return false;
     }
 
-    function onlyAllowed(address adminAllowed) internal view returns (bool)  {
+    function onlyAllowed(address adminAllowed) internal view returns (bool) {
         require(
             isSaleEnded || adminAllowed == owner() || adminAllowed == saleAdmin,
             "Token Transfer is not allowed during the sale"
