@@ -37,14 +37,16 @@ contract DutchAuction is Ownable {
     uint256 public priceConst;
 
     uint256 public startBlock;
-    uint256 public endTime;
+    uint256 public endBlock;
     // wei received
     uint256 public totalReceived;
     uint256 public finalPrice;
     mapping(address => uint256) public bids;
     Stages public stage;
     bool public saleEnded;
-    uint256 duration;
+    uint256 public blockDuration;
+    //bool public isFloorPrice;
+    //uint256 public floorPrice;
 
     struct AllowedToken {
         bytes32 ticker;
@@ -72,11 +74,17 @@ contract DutchAuction is Ownable {
     }
 
     modifier timedTransitions() {
+        //if (
+        //    stage == Stages.AuctionStarted &&
+        //    ((calcTokenPrice() <= calcStopPrice()) ||
+        //        block.timestamp >= endBlock ||
+        //        calculatedPrice() == floorPrice)
+        //) finalizeAuction();
         if (
             stage == Stages.AuctionStarted &&
-            ((calcTokenPrice() <= calcStopPrice()) ||
-                block.timestamp >= endTime)
+            ((calcTokenPrice() <= calcStopPrice()) || block.number >= endBlock)
         ) finalizeAuction();
+
         if (stage == Stages.AuctionEnded && saleEnded)
             stage = Stages.TradingStarted;
         _;
@@ -105,7 +113,7 @@ contract DutchAuction is Ownable {
         uint256 _priceFactorNumerator,
         uint256 _priceFactorDenominator,
         uint256 _priceConst,
-        uint256 _duration
+        uint256 _blockDuration
     ) public {
         require(
             _wallet != address(0) ||
@@ -113,17 +121,18 @@ contract DutchAuction is Ownable {
                 _priceFactorNumerator != 0 ||
                 _priceFactorDenominator != 0 ||
                 _priceConst != 0 ||
-                _duration != 0,
+                _blockDuration != 0,
             "Arguments are null"
         );
 
         wallet = _wallet;
         ceiling = _ceiling;
-        duration = _duration;
+        blockDuration = _blockDuration;
         // Parameters for calcTokenPrice() equation
         priceFactorNumerator = _priceFactorNumerator;
         priceFactorDenominator = _priceFactorDenominator;
         priceConst = _priceConst;
+        //floorPrice = _floorPrice;
 
         stage = Stages.AuctionDeployed;
     }
@@ -162,7 +171,7 @@ contract DutchAuction is Ownable {
     function startAuction() public onlyOwner atStage(Stages.AuctionSetUp) {
         stage = Stages.AuctionStarted;
         startBlock = block.number;
-        endTime = duration.add(block.timestamp);
+        endBlock = blockDuration.add(startBlock);
     }
 
     /// @dev Changes auction ceiling and start price factor before auction is started.
@@ -176,15 +185,16 @@ contract DutchAuction is Ownable {
         uint256 _priceFactorNumerator,
         uint256 _priceFactorDenominator,
         uint256 _priceConst,
-        uint256 _duration
+        uint256 _blockDuration
     ) public onlyOwner atStage(Stages.AuctionSetUp) {
         ceiling = _ceiling;
         // Parameters for calcTokenPrice() equation
         priceFactorNumerator = _priceFactorNumerator;
         priceFactorDenominator = _priceFactorDenominator;
         priceConst = _priceConst;
-        // max duration of the sale
-        duration = _duration;
+        //floorPrice = _floorPrice;
+        // max blockDuration of the sale
+        blockDuration = _blockDuration;
     }
 
     /// @dev Calculates current token price.
@@ -259,8 +269,8 @@ contract DutchAuction is Ownable {
         external
         payable
         tokenExist(tickerEBTC)
-        timedTransitions
         atStage(Stages.AuctionStarted)
+        timedTransitions
         returns (uint256 actualAmount)
     {
         address tokenDeposit = allowedTokens[tickerEBTC].tokenAddress;
@@ -269,42 +279,50 @@ contract DutchAuction is Ownable {
             address(this),
             amountEBTC
         );
-
-        // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
-        //uint256 maxWei =
-        uint256 maxWei =
-            ((MAX_TOKENS_SOLD.div(10**18)).mul(calcTokenPrice())).sub(
-                totalReceived
-            );
-        uint256 maxWeiBasedOnTotalReceived = ceiling.sub(totalReceived);
-        if (maxWeiBasedOnTotalReceived < maxWei)
-            maxWei = maxWeiBasedOnTotalReceived;
-
-        // Only invest maximum possible amount.
-        if (amountEBTC > maxWei) {
-            uint256 reImburse = amountEBTC.sub(maxWei);
-            amountEBTC = maxWei;
+        // Auction has ended during this block - full reimburse
+        if (stage == Stages.AuctionEnded) {
             require(
-                IERC20(tokenDeposit).transfer(receiver, reImburse),
+                IERC20(tokenDeposit).transfer(receiver, amountEBTC),
                 "Reimburse failed"
             );
+            return 0;
+        } else {
+            // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
+            //uint256 maxWei =
+            uint256 maxWei =
+                ((MAX_TOKENS_SOLD.div(10**18)).mul(calcTokenPrice())).sub(
+                    totalReceived
+                );
+            uint256 maxWeiBasedOnTotalReceived = ceiling.sub(totalReceived);
+            if (maxWeiBasedOnTotalReceived < maxWei)
+                maxWei = maxWeiBasedOnTotalReceived;
+
+            // Only invest maximum possible amount.
+            if (amountEBTC > maxWei) {
+                uint256 reImburse = amountEBTC.sub(maxWei);
+                amountEBTC = maxWei;
+                require(
+                    IERC20(tokenDeposit).transfer(receiver, reImburse),
+                    "Reimburse failed"
+                );
+            }
+
+            // Forward funding to vault wallet
+            require(amountEBTC != 0);
+            require(
+                IERC20(tokenDeposit).transfer(wallet, amountEBTC),
+                "Deposit to Vault failed"
+            );
+
+            bids[receiver] = bids[receiver].add(amountEBTC);
+            totalReceived = totalReceived.add(amountEBTC);
+            if (maxWei == amountEBTC)
+                // When maxWei is equal to thSe big amount the auction is ended and finalizeAuction is triggered.
+                finalizeAuction();
+            BidSubmission(receiver, amountEBTC);
+            actualAmount = amountEBTC;
+            return actualAmount;
         }
-
-        // Forward funding to vault wallet
-        require(amountEBTC != 0);
-        require(
-            IERC20(tokenDeposit).transfer(wallet, amountEBTC),
-            "Deposit to Vault failed"
-        );
-
-        bids[receiver] = bids[receiver].add(amountEBTC);
-        totalReceived = totalReceived.add(amountEBTC);
-        if (maxWei == amountEBTC)
-            // When maxWei is equal to thSe big amount the auction is ended and finalizeAuction is triggered.
-            finalizeAuction();
-        BidSubmission(receiver, amountEBTC);
-        actualAmount = amountEBTC;
-        return actualAmount;
     }
 
     /// @dev Claims tokens for bidder after auction.
@@ -329,19 +347,30 @@ contract DutchAuction is Ownable {
 
     /// @dev Calculates token price.
     /// @return Returns token price.
-    function calcTokenPrice() public view returns (uint256) {
+    function calcTokenPrice() public returns (uint256) {
         // return (priceFactor * 10**18) / (block.number - startBlock + 7500) + 1;
-        return
+        uint256 lastBlock;
+        if (block.number >= endBlock) {
+            lastBlock = endBlock;
+        } else {
+            lastBlock = block.number;
+        }
+        uint256 calculatedPrice =
             (
                 (priceFactorNumerator.mul(10**18)).div(
                     (
                         priceFactorDenominator.mul(
-                            ((block.number.sub(startBlock)).add(priceConst))
+                            ((lastBlock.sub(startBlock)).add(priceConst))
                         )
                     )
                 )
             )
                 .add(1);
+        //if (calculatedPrice <= floorPrice) {
+        //    calculatedPrice = floorPrice;
+        //    isFloorPrice = true;
+        // }
+        return calculatedPrice;
     }
 
     /// @dev Close the sale after it has ended
@@ -361,12 +390,13 @@ contract DutchAuction is Ownable {
      */
     function finalizeAuction() private {
         stage = Stages.AuctionEnded;
-        if (totalReceived == ceiling || block.timestamp >= endTime) {
+        //if (totalReceived == ceiling || block.number >= endBlock) {
+        if ((totalReceived == ceiling) || block.number >= endBlock) {
             finalPrice = calcTokenPrice();
         } else finalPrice = calcStopPrice();
         uint256 soldTokens = (totalReceived.mul(10**18)).div(finalPrice);
         // Auction contract transfers all unsold tokens to Sovryn inventory multisig
         sovrynToken.transfer(wallet, MAX_TOKENS_SOLD.sub(soldTokens));
-        //endTime = now;
+        //endBlock = now;
     }
 }

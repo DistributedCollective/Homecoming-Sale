@@ -1,6 +1,7 @@
 node_modules/
 build/
 .secrets
-
+package-lock.json
+temp/
 
 

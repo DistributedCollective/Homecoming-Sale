@@ -1,4 +1,3 @@
-//const { expectRevert, increaseTime } = require('@openzeppelin/test-helpers');
 const { expectEvent, expectRevert, time, expect } = require('@openzeppelin/test-helpers');
 const DutchAuction = artifacts.require('DutchAuction.sol');
 const ESOVToken = artifacts.require('ESOVToken.sol');
@@ -13,19 +12,20 @@ contract('DutchAuction', (accounts) => {
   let gasPrice;
   let wbtc, sbtc;
   let dutchAddress;
+  let totalReceivedTest = web3.utils.toBN('0');
 
   const [WBTC, SBTC] = ['WBTC', 'SBTC']
         .map(ticker => web3.utils.fromAscii(ticker));
 
   const totalSupply = web3.utils.toWei('2000000');
   
-  const duration = 20;
-  const rate = 2; 
+  let blockDuration = 20;
   
-  let ceiling = web3.utils.toWei('2.2');
-  let priceFactorNumerator = '45';
+  let ceiling = web3.utils.toWei('2.5');
+  let priceFactorNumerator = '6';
   let priceFactorDenominator = '10000';
-  let priceConst = '180';
+  let priceConst = '6';
+  //let floorPrice = web3.utils.toWei('0.00003');
 
   const investor1 = accounts[1];
   const investor2 = accounts[2];
@@ -41,67 +41,15 @@ contract('DutchAuction', (accounts) => {
   let owner = accounts[0]; 
   console.log("Owner: " + owner);
   
-  const sovrynAddress = accounts[8];
-  const esovAdmin = accounts[9];
-  
-  /// Need to complete 0 values in dutchacution sc
-  
-  /*before(async () => {
-    //deploy ESOVToken
-    //owner = accounts[0];
-    token = await ESOVToken.new(totalSupply, esovAdmin, {from: owner});
-    tokenAddr = await token.address;
-    console.log("ESOVToken Address: " + tokenAddr);
-    console.log("ESOVToken owner from SC: " + await token.owner());
-  });
-  */
-  /*describe("Deploy DutchAuction", () => {
-    it('Should Deploy DutchAuction', async () => {
-      //owner = accounts[0];
-      dutch = await DutchAuction.new(
-        sovrynAddress,
-        ceiling,
-        priceFactorNumerator,
-        priceFactorDenominator,
-        priceConst,
-        { from: owner });
-      dutchAddress = await dutch.address; 
-    });
-  });
- */
-/*  
-  describe("Check Deployment", () => {
-    it('Check ESOV Deployment', async () => {
-      const totalSC = await token.totalSupply();
-      const ownerSC = await token.owner();
-
-      assert(totalSC.eq(web3.utils.toBN(totalSupply)));
-      console.log( "ESOV Owner: " + ownerSC );
-      console.log( "ESOV Owner: " + esovAdmin );
-    });
-    it('Check DutchAuction Deployment', async () => {
-      const ceilingSC = await dutch.ceiling();
-      const priceFactorSC = await dutch.priceFactor();
-      const walletSC = await dutch.wallet();
-      const ownerSC = await dutch.owner();
-
-      assert(ceilingSC.eq(web3.utils.toBN(ceiling)));
-      assert(priceFactorSC.eq(web3.utils.toBN(priceFactor)));
-      console.log( "Vault: " + walletSC );
-      console.log( "Vault: " + sovrynAddress );
-      console.log( "Dutch Owner: " + ownerSC );
-      console.log( "Dutch Owner: " + owner );
-      let currentStage =await dutch.stage();
-      assert(currentStage.toNumber() === 0);
-    });
-  });
-
-*/
-
-  beforeEach (async () => {
+  let sovrynAddress = accounts[8];
+  let esovAdmin = accounts[9];
+    
+describe("Deploy DutchAuction contracts", () => {
+  it('Check ESOV Deployment', async () => {
   //deploy ESOVToken
     token = await ESOVToken.new(totalSupply, esovAdmin, {from: owner});
     tokenAddr = await token.address;
+
   // Deploy DutchAuction  
     dutch = await DutchAuction.new(
       sovrynAddress,
@@ -109,17 +57,101 @@ contract('DutchAuction', (accounts) => {
       priceFactorNumerator,
       priceFactorDenominator,
       priceConst,
-      duration,
+      blockDuration,
       { from: owner });
     dutchAddress = await dutch.address;
+
     await token.setSaleAdmin(dutchAddress, {from: esovAdmin});
     console.log("ESOV sc balance: " + await token.balanceOf(dutchAddress));
 
     ([wbtc, sbtc] = await Promise.all([
       Wbtc.new(),
       Sbtc.new()
+    ]));
+
+    await dutch.addToken([WBTC, SBTC], [wbtc.address, sbtc.address], { from: owner });
+
+  // seed amount per investor per ERC20-BTC
+    const amount = web3.utils.toWei('2');
+  // Declare a function that:
+  // 1. Faucet the trader account
+  // 2. Approve DutchAuction SC for token transfer.
+    const seedTokenBalance = async (token, investor) => {
+      await token.faucet(investor, amount, { from: esovAdmin });
+    
+      await token.approve(
+              dutchAddress,
+              amount,
+              {from: investor}
+          );
+      };
+  // Call the seedTokenBalance function
+      await Promise.all(
+          [wbtc, sbtc].map(
+              token => seedTokenBalance(token, investor1)
+          )
+      );
+      await Promise.all(
+          [wbtc, sbtc].map(
+              token => seedTokenBalance(token, investor2)
+          )
+      );
+  });
+/*
+  it('Check ESOV Deployment', async () => {
+    const totalSC = await token.totalSupply();
+    const ownerSC = await token.owner();
+
+    assert(totalSC.eq(web3.utils.toBN(totalSupply)));
+    console.log( "ESOV Owner: " + ownerSC );
+    console.log( "ESOV Owner: " + esovAdmin );
+  });
+  it('Check DutchAuction Deployment', async () => {
+    const walletSC = await dutch.wallet();
+    const ceilingSC = await dutch.ceiling();
+    const priceFactorNumeratorSC = await dutch.priceFactorNumerator();
+    const priceFactorDenominatorSC = await dutch.priceFactorDenominator();
+    const priceConstSC = await dutch.priceConst();
+    const blockDurationSC = await dutch.blockDuration();
+    const ownerSC = await dutch.owner();
+
+    assert(ceilingSC.eq(web3.utils.toBN(ceiling)));
+    assert(priceFactorNumeratorSC.eq(web3.utils.toBN(priceFactorNumeratorSC)));
+    assert(priceFactorDenominatorSC.eq(web3.utils.toBN(priceFactorDenominatorSC)));
+    assert(priceConstSC.eq(web3.utils.toBN(priceConstSC)));
+    assert(blockDurationSC.eq(web3.utils.toBN(blockDurationSC)));
+    console.log( "Vault: " + walletSC );
+    console.log( "Vault: " + sovrynAddress );
+    console.log( "Dutch Owner: " + ownerSC );
+    console.log( "Dutch Owner: " + owner );
+    let currentStage =await dutch.stage();
+    assert(currentStage.toNumber() === 0);
+  });
+*/
+});
+
+beforeEach (async () => {
+//deploy ESOVToken
+    token = await ESOVToken.new(totalSupply, esovAdmin, {from: owner});
+    tokenAddr = await token.address;
+// Deploy DutchAuction  
+    dutch = await DutchAuction.new(
+      sovrynAddress,
+      ceiling,
+      priceFactorNumerator,
+      priceFactorDenominator,
+      priceConst,
+      blockDuration,
+      { from: owner });
+    dutchAddress = await dutch.address;
+    await token.setSaleAdmin(dutchAddress, {from: esovAdmin});
+    //console.log("ESOV sc balance: " + await token.balanceOf(dutchAddress));
+
+    ([wbtc, sbtc] = await Promise.all([
+      Wbtc.new(),
+      Sbtc.new()
      ]));
- 
+// Add Allowed token deposit to DutchAuction 
     await dutch.addToken([WBTC, SBTC], [wbtc.address, sbtc.address], { from: owner });
   
   // seed amount per investor per ERC20-BTC
@@ -128,36 +160,31 @@ contract('DutchAuction', (accounts) => {
   // 1. Faucet the trader account
     const seedTokenBalance = async (token, investor) => {
       await token.faucet(investor, amount, { from: esovAdmin });
-      //    let bal = 
-       //   console.log("investor1 SBTC balance: " + await token.balanceOf(investor1));
-       //   console.log(token + investor + )
-          await token.approve(
+
+      await token.approve(
               dutchAddress,
               amount,
               {from: investor}
           );
       };
   // Call the seedTokenBalance function
-    await Promise.all(
+      await Promise.all(
           [wbtc, sbtc].map(
               token => seedTokenBalance(token, investor1)
           )
       );
-    await Promise.all(
+      await Promise.all(
           [wbtc, sbtc].map(
               token => seedTokenBalance(token, investor2)
           )
       );
-  });
-  
-  
-  
+});
 /*
-  describe("setup", () => {
+describe("setup", () => {
     it('should NOT setup if not owner', async () => {
       await expectRevert(
-        dutch.setup(tokenAddr,{ from: sovrynAddress }),
-        'Only owner is allowed to proceed'
+        dutch.setup(tokenAddr, esovAdmin,{ from: accounts[2] }),
+        'Ownable: caller is not the owner.'
       );
     });
     
@@ -165,73 +192,57 @@ contract('DutchAuction', (accounts) => {
       let currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 0);
       await dutch.setup(tokenAddr, esovAdmin,{ from: owner });
-      //owner = esovAdmin;
-      console.log(" DutchAuction token address: " + await dutch.gnosisToken());
+      console.log(" DutchAuction new owner: " + await dutch.owner());
+      console.log(" DutchAuction token address: " + await dutch.sovrynToken());
       currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 1);
-    });
-  });
-  
-  describe("changeOwner", () => {
-    it('should NOT changeOwner if not owner', async () => {
-      await expectRevert(
-        dutch.changeOwner(sovrynAddress,{ from: sovrynAddress }),
-        'Only owner is allowed to proceed'
-      );
-    });
-    
-    it('should changeOwner', async () => {
-      await dutch.changeOwner(accounts[6],{ from: owner });
-      console.log(" DutchAuction owner: " + await dutch.owner());
-      await dutch.changeOwner(owner, { from: accounts[6]});
-    });
-  });
+      });
+});
 
-  describe("changeSettings", () => {
+describe("changeSettings", () => {
     it('should NOT changeSettings if not owner', async () => {
       await dutch.setup(tokenAddr, esovAdmin,{ from: owner });
-      //owner = esovAdmin;
       let currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 1);
       await expectRevert(
-        dutch.changeSettings(1000 ,2 , { from: sovrynAddress }),
-        'Only owner is allowed to proceed'
-      );
+        dutch.changeSettings(1000 ,8 ,10000, 9, 30, { from: accounts[2] }),
+        'Ownable: caller is not the owner.'
+      );  
     });
     
     it('should changeSettings', async () => {
       await dutch.setup(tokenAddr, esovAdmin,{ from: owner });
-      //owner = esovAdmin;
       let currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 1);
-      ceiling = web3.utils.toWei('1000');
-      priceFactor = 2;
-      dutch.changeSettings(ceiling ,priceFactor , { from: owner }),
-      console.log(" DutchAuction owner: " + await dutch.owner());
-      
-      //currentStage =await dutch.stage();
-      //assert(currentStage.toNumber() === 2);
-      //console.log(currentStage.toNumber());
-      
-      //ceiling = web3.utils.toWei('1000');
-      //priceFactor = 2;
+
+      await dutch.changeSettings(1000 ,8 ,10000, 9, 30, { from: esovAdmin });
+
       const ceilingSC = await dutch.ceiling();
-      const priceFactorSC = await dutch.priceFactor();
-      
-      assert(ceilingSC.eq(web3.utils.toBN(ceiling)));
-      assert(priceFactorSC.eq(web3.utils.toBN(priceFactor)));
+      const priceFactorNumeratorSC = await dutch.priceFactorNumerator();
+      const priceFactorDenominatorSC = await dutch.priceFactorDenominator();
+      const priceConstSC = await dutch.priceConst();
+      const blockDurationSC = await dutch.blockDuration();
+      //const floorPriceSC = await dutch.floorPrice();
+
+  
+      assert(ceilingSC.eq(web3.utils.toBN('1000')));
+      assert(priceFactorNumeratorSC.eq(web3.utils.toBN('8')));
+      assert(priceFactorDenominatorSC.eq(web3.utils.toBN('10000')));
+      assert(priceConstSC.eq(web3.utils.toBN('9')));
+      assert(blockDurationSC.eq(web3.utils.toBN('30')));
+      //assert(floorPriceSC.eq(web3.utils.toBN(web3.utils.toWei('0.0003'));
 
     });
-  });
-*/
-  describe("startAuction", () => {
+});
+
+describe("startAuction", () => {
     it('should NOT startAuction if not owner', async () => {
       await dutch.setup(tokenAddr, esovAdmin, { from: owner });
       let currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 1);
       await expectRevert(
         dutch.startAuction({ from: sovrynAddress }),
-        'Ownable: caller is not the owner'
+        'Ownable: caller is not the owner.'
       );
     });
     
@@ -240,13 +251,509 @@ contract('DutchAuction', (accounts) => {
       let currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 1);
       await dutch.startAuction({ from: esovAdmin });
-      console.log(" DutchAuction owner: " + await dutch.owner());
       currentStage =await dutch.stage();
       assert(currentStage.toNumber() === 2);
       console.log(currentStage.toNumber());
+    });
+});
 
+// bidEBTC - ERC20 (BTC wrapper) deposit
+describe("bidEBTC NOT on correct Stage", () => {
+    it('should NOT send bidEBTC if not on AuctionStarted stage', async () => {
+      await dutch.setup(tokenAddr, esovAdmin, { from: owner });
+      let bidAmount = web3.utils.toWei('1');
+      await expectRevert(
+        dutch.bidEBTC(investor2, bidAmount, sbtc, {from: investor2}),
+        "Contract not in expected stage"
+      );
+    })
+});
+*/
+describe("bidEBTC onStage - deposit ceiling constraint path", () => {
+    beforeEach(async () => {
+      await dutch.setup(tokenAddr, esovAdmin, { from: owner });
+      await dutch.startAuction({ from: esovAdmin });
+      currentStage =await dutch.stage();
+      assert(currentStage.toNumber() === 2);
+    });  
+    
+    it('should NOT send bidEBTC if not allowed token deposit', async () => {
+      await dutch.removeToken([WBTC], { from: esovAdmin });
+      let allowedToken = await dutch.allowedTokens(WBTC);
+      console.log("sbtc Not allowed (should be 0x0): " + allowedToken.tokenAddress);
+
+      let bidAmount = web3.utils.toWei('1');
+      await expectRevert(
+        dutch.bidEBTC(investor2, bidAmount, WBTC, {from: investor2}),
+        "this token is not Allowed"
+      );
+    });
+
+    it('Full flow send bidEBTC => end sale at ceiling => reimburse => close sale => claim ESOV', async () => {
+      let blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);
+
+      let tprice = await dutch.calcTokenPrice.call();
+      console.log("t0 price: " + tprice); 
+      
+      let allowedArray = [];
+      
+      let allowedToken = await dutch.allowedTokens(WBTC);
+      console.log("WBTC address allowed: " + allowedToken.tokenAddress);
+      allowedToken = await dutch.allowedTokens(SBTC);
+      console.log("SBTC address allowed: " + allowedToken.tokenAddress);
+      
+      let bidAmount = web3.utils.toWei('1.1');
+    // Deposit 1: investor1 deposit wbtc
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("t1 price: " + tprice); 
+  
+      let wbtcInvestor1BalanceBefore = await wbtc.balanceOf(investor1);
+      let auctionTotalreceivedBefore = await dutch.totalReceived()
+      let walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+      
+      let tx = await dutch.bidEBTC(investor1, bidAmount, WBTC, {from: investor1});
+      totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(bidAmount));
+
+      let wbtcInvestor1BalanceAfter = await wbtc.balanceOf(investor1);
+      let auctionTotalreceivedAfter = await dutch.totalReceived()
+      let walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+
+      expectEvent(tx, 'BidSubmission', {
+        sender: investor1,
+        amount: '1100000000000000000'
+      });
+      
+      assert((wbtcInvestor1BalanceBefore - wbtcInvestor1BalanceAfter) ==
+             (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+      assert((wbtcInvestor1BalanceBefore - wbtcInvestor1BalanceAfter) ==
+             (walletwbtcAfter - walletwbtcBefore));
+   
+    // Deposit 2:  investor1 deposit sbtc
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);    
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("t2 price: " + tprice); 
+
+      let sbtcInvestor1BalanceBefore = await sbtc.balanceOf(investor1);
+      auctionTotalreceivedBefore = await dutch.totalReceived()
+      let walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+      
+      tx = await dutch.bidEBTC(investor1, bidAmount, SBTC, {from: investor1});
+      totalReceivedTest  = totalReceivedTest.add(web3.utils.toBN(bidAmount));
+
+      let sbtcInvestor1BalanceAfter = await sbtc.balanceOf(investor1);
+      auctionTotalreceivedAfter = await dutch.totalReceived()
+      let walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+
+      expectEvent(tx, 'BidSubmission', {
+        sender: investor1,
+        amount: '1100000000000000000'
+      });
+      
+      assert((sbtcInvestor1BalanceBefore - sbtcInvestor1BalanceAfter) ==
+             (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+      assert((sbtcInvestor1BalanceBefore - sbtcInvestor1BalanceAfter) ==
+             (walletsbtcAfter - walletsbtcBefore));         
+             
+    // Deposit 3: investor2 deposit sbtc - ceiling is reached,  0.2 reimbursed
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("t3 price: " + tprice);   
+    
+      bidAmount = web3.utils.toWei('0.5');
+      let sbtcInvestor2BalanceBefore = await sbtc.balanceOf(investor2);
+      auctionTotalreceivedBefore = await dutch.totalReceived()
+      walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+      
+      tx = await dutch.bidEBTC(investor2, bidAmount, SBTC, {from: investor2});
+      totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(web3.utils.toWei('0.3')));
+      
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      
+      const calcPriceEnd = await dutch.calcTokenPrice.call();
+      const calcPriceFinal = await dutch.finalPrice();
+      const calcStopPrice = await dutch.calcStopPrice();
+
+      let sbtcInvestor2BalanceAfter = await sbtc.balanceOf(investor2);
+      auctionTotalreceivedAfter = await dutch.totalReceived()
+      walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+
+      expectEvent(tx, 'BidSubmission', {
+        sender: investor2,
+        amount: '300000000000000000'
+      });
+      
+      assert((sbtcInvestor2BalanceBefore - sbtcInvestor2BalanceAfter) ==
+             (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+      assert((sbtcInvestor2BalanceBefore - sbtcInvestor2BalanceAfter) ==
+             (walletsbtcAfter - walletsbtcBefore));         
+
+    // Deposit 4: Deposit not allowed, since stage has changed to AuctionEnded
+      let currentStage =await dutch.stage();
+      assert(currentStage.toNumber() === 3);
+
+      await expectRevert(
+        dutch.bidEBTC(investor2, bidAmount, SBTC, {from: investor2}),
+              'Contract not in expected stage.'
+      );
+    //
+
+    // Validate final price
+      const totalReceived = await dutch.totalReceived();
+      assert(totalReceived.eq(totalReceivedTest));
+      
+      const soldTokens = (totalReceived * (10**18))/calcPriceFinal;
+      const soldTokensSC = await token.balanceOf(dutchAddress);
+      assert(soldTokensSC == soldTokens);
+
+      const leftTokens = await token.balanceOf(sovrynAddress);
+      const totalCalculated = soldTokensSC + leftTokens;
+
+      console.log("totalCalculated: " + totalCalculated);
+      console.log("calcStopPrice: " + calcStopPrice);
+      console.log("calcPriceEnd: " + calcPriceEnd);
+      console.log("calcPriceFinal: " + calcPriceFinal);
+
+      console.log("soldTokens: " + soldTokens);
+      console.log("ESOV sc balance: " + soldTokensSC);
+      console.log("ESOV Wallet balance: " + leftTokens);
+      
+      
+      console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
+      
+     
+      //let blockDuration = await dutch.WAITING_PERIOD();
+      //const start = parseInt((new Date()).getTime() / 1000);
+      //let end = start + blockDuration ;
+      //await time.increaseTo(end);
+      await expectRevert(
+        dutch.claimTokens({from: investor1}),
+        "Contract not in expected stage"
+      );
+      
+      await dutch.saleClosure(true, { from: esovAdmin });
+      
+      const investor1Bids = await dutch.bids(investor1);
+      const investor1ESOVAmount = (investor1Bids * (10**18))/calcPriceFinal;
+      console.log("investor1ESOVAmount: " + investor1ESOVAmount);
+      
+      await dutch.claimTokens({from: investor1});
+      const investor1ESOVBal = await token.balanceOf(investor1)
+      assert(investor1ESOVBal == investor1ESOVAmount);
+      console.log( "investor1 ESOV bal: " + await token.balanceOf(investor1));
+      console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
+
+    // Cannot claimTokens twice
+      await expectRevert(
+        dutch.claimTokens({from: investor1}),
+        "Not eligable to receive tokens"
+      );
+
+      const investor2Bids = await dutch.bids(investor2);
+      const investor2ESOVAmount = (investor2Bids * (10**18))/calcPriceFinal;
+      console.log("investor2ESOVAmount: " + investor2ESOVAmount);
+
+      await dutch.claimTokens({from: investor2});
+      const investor2ESOVBal = await token.balanceOf(investor2);
+      //assert(investor2ESOVBal == investor2ESOVAmount);
+      console.log( "investor2 ESOV bal: " + await token.balanceOf(investor2));
+      console.log("investor2 ESOV SC bal: "+ await dutch.bids(investor2));
+
+     // console.log(await dutch.isFloorPrice());
     });
   });
+//////////////////////////////////////////
+  describe("bidEBTC onStage - blockDuration constraint path", () => {
+    beforeEach(async () => {
+    
+      blockDuration = 6;
+      await dutch.setup(tokenAddr, esovAdmin, { from: owner });
+      await dutch.changeSettings(
+        ceiling,
+        priceFactorNumerator,
+        priceFactorDenominator,
+        priceConst,
+        blockDuration,
+         { from: esovAdmin });
+
+      await dutch.startAuction({ from: esovAdmin });
+      currentStage = await dutch.stage();
+      assert(currentStage.toNumber() === 2);
+    });
+
+    it('Full flow send bidEBTC => end sale at blockEnd => reimburse => close sale => claim ESOV', async () => {
+      let blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      let tprice = await dutch.calcTokenPrice.call();
+      console.log("t0 price: " + tprice);
+    
+      let allowedArray = [];
+    
+      let allowedToken = await dutch.allowedTokens(WBTC);
+      console.log("WBTC address allowed: " + allowedToken.tokenAddress);
+      allowedToken = await dutch.allowedTokens(SBTC);
+      console.log("SBTC address allowed: " + allowedToken.tokenAddress);
+    
+      let bidAmount = web3.utils.toWei('1.1');
+      
+      // Deposit 1: investor1 deposit wbtc
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("t1 price: " + tprice);
+
+      let wbtcInvestor1BalanceBefore = await wbtc.balanceOf(investor1);
+      let auctionTotalreceivedBefore = await dutch.totalReceived()
+      let walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+    
+      let tx = await dutch.bidEBTC(investor1, bidAmount, WBTC, { from: investor1 });
+      totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(bidAmount));
+
+      let wbtcInvestor1BalanceAfter = await wbtc.balanceOf(investor1);
+      let auctionTotalreceivedAfter = await dutch.totalReceived()
+      let walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+
+      expectEvent(tx, 'BidSubmission', {
+        sender: investor1,
+        amount: '1100000000000000000'
+      });
+    
+      assert((wbtcInvestor1BalanceBefore - wbtcInvestor1BalanceAfter) ==
+        (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+      assert((wbtcInvestor1BalanceBefore - wbtcInvestor1BalanceAfter) ==
+        (walletwbtcAfter - walletwbtcBefore));
+ 
+      // Deposit 2:  investor2 deposit sbtc 
+      bidAmount = web3.utils.toWei('0.1');
+      
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+      
+      await time.advanceBlock();
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+        
+      await time.advanceBlock();
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber); 
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+ 
+      dutch.bidEBTC(investor2, bidAmount, SBTC, { from: investor2 });
+
+      await time.advanceBlock();
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber); 
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+
+      await time.advanceBlock(); 
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+
+      await time.advanceBlock();
+      blockNumber = await web3.eth.getBlockNumber();
+      console.log("block#: " + blockNumber);  
+      tprice = await dutch.calcTokenPrice.call();
+      console.log("price: " + tprice);
+        
+      // Deposit 2:  investor2 gets full reimbursment of sbtc beacuse reached blockEnd ==> auction ends
+
+      let sbtcInvestor2BalanceBefore = await sbtc.balanceOf(investor2);
+      auctionTotalreceivedBefore = await dutch.totalReceived()
+      walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+    
+      console.log("sbtcInvestor2BalanceBefore: " + sbtcInvestor2BalanceBefore);
+      console.log("auctionTotalreceivedBefore: " + auctionTotalreceivedBefore);
+      console.log("walletsbtcBefore: " + walletsbtcBefore);
+
+      let currentStage = await dutch.stage();
+      console.log("stage is: " + currentStage);
+      dutch.bidEBTC(investor2, bidAmount, SBTC, { from: investor2 })
+
+      let sbtcInvestor2BalanceAfter = await sbtc.balanceOf(investor2);
+      auctionTotalreceivedAfter = await dutch.totalReceived()
+      let walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+
+      console.log("sbtcInvestor2BalanceAfter: " + sbtcInvestor2BalanceAfter);
+      console.log("auctionTotalreceivedAfter: " + auctionTotalreceivedAfter);
+      console.log("walletsbtcAfter: " + walletsbtcAfter);
+
+      // Auction has ended
+      await expectRevert(
+        dutch.bidEBTC(investor2, bidAmount, SBTC, { from: investor2 }),
+        'Contract not in expected stage.'
+      );
+      
+      currentStage = await dutch.stage();
+      assert(currentStage.toNumber() === 3);
+      console.log("stage is: " + currentStage);
+
+
+      // Validate final price
+      
+      const calcPriceEnd = await dutch.calcTokenPrice.call();
+      const calcPriceFinal = await dutch.finalPrice();
+      const calcStopPrice = await dutch.calcStopPrice();
+      
+      
+      const totalReceived = await dutch.totalReceived();
+      //assert(totalReceived.eq(totalReceivedTest));
+      
+      const soldTokens = (totalReceived * (10**18))/calcPriceFinal;
+      const soldTokensSC = await token.balanceOf(dutchAddress);
+      //assert(soldTokensSC == soldTokens);
+
+      const leftTokens = await token.balanceOf(sovrynAddress);
+      const totalCalculated = soldTokensSC + leftTokens;
+
+      console.log("totalCalculated: " + totalCalculated);
+      console.log("calcStopPrice: " + calcStopPrice);
+      console.log("calcPriceEnd: " + calcPriceEnd);
+      console.log("calcPriceFinal: " + calcPriceFinal);
+
+      console.log("soldTokens: " + soldTokens);
+      console.log("ESOV sc balance: " + soldTokensSC);
+      console.log("ESOV Wallet balance: " + leftTokens);
+      
+      //
+      /*
+      
+          tx = await dutch.bidEBTC(investor1, bidAmount, SBTC, {from: investor1});
+          totalReceivedTest  = totalReceivedTest.add(web3.utils.toBN(bidAmount));
+      
+          let sbtcInvestor1BalanceAfter = await sbtc.balanceOf(investor1);
+          auctionTotalreceivedAfter = await dutch.totalReceived()
+          let walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+      
+          expectEvent(tx, 'BidSubmission', {
+            sender: investor1,
+            amount: '1100000000000000000'
+          });
+          
+          assert((sbtcInvestor1BalanceBefore - sbtcInvestor1BalanceAfter) ==
+                 (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+          assert((sbtcInvestor1BalanceBefore - sbtcInvestor1BalanceAfter) ==
+                 (walletsbtcAfter - walletsbtcBefore));         
+                 
+        // Deposit 3: investor2 deposit sbtc - ceiling is reached,  0.2 reimbursed
+          bidAmount = web3.utils.toWei('0.5');
+          let sbtcInvestor2BalanceBefore = await sbtc.balanceOf(investor2);
+          auctionTotalreceivedBefore = await dutch.totalReceived()
+          walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+          
+          tx = await dutch.bidEBTC(investor2, bidAmount, SBTC, {from: investor2});
+          totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(web3.utils.toWei('0.3')));
+          
+          const calcPriceEnd = await dutch.calcTokenPrice.call();
+          const calcPriceFinal = await dutch.finalPrice();
+          const calcStopPrice = await dutch.calcStopPrice();
+      
+          let sbtcInvestor2BalanceAfter = await sbtc.balanceOf(investor2);
+          auctionTotalreceivedAfter = await dutch.totalReceived()
+          walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+      
+          expectEvent(tx, 'BidSubmission', {
+            sender: investor2,
+            amount: '300000000000000000'
+          });
+          
+          assert((sbtcInvestor2BalanceBefore - sbtcInvestor2BalanceAfter) ==
+                 (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
+          assert((sbtcInvestor2BalanceBefore - sbtcInvestor2BalanceAfter) ==
+                 (walletsbtcAfter - walletsbtcBefore));         
+      
+        // Deposit 4: Deposit not allowed, since stage has changed to AuctionEnded
+          let currentStage =await dutch.stage();
+          assert(currentStage.toNumber() === 3);
+      
+          await expectRevert(
+            dutch.bidEBTC(investor2, bidAmount, SBTC, {from: investor2}),
+                  'Contract not in expected stage.'
+          );
+        //
+      
+        // Validate final price
+          const totalReceived = await dutch.totalReceived();
+          assert(totalReceived.eq(totalReceivedTest));
+          
+          const soldTokens = (totalReceived * (10**18))/calcPriceFinal;
+          const soldTokensSC = await token.balanceOf(dutchAddress);
+          assert(soldTokensSC == soldTokens);
+      
+          const leftTokens = await token.balanceOf(sovrynAddress);
+          const totalCalculated = soldTokensSC + leftTokens;
+      
+          console.log("totalCalculated: " + totalCalculated);
+          console.log("calcStopPrice: " + calcStopPrice);
+          console.log("calcPriceEnd: " + calcPriceEnd);
+          console.log("calcPriceFinal: " + calcPriceFinal);
+      
+          console.log("soldTokens: " + soldTokens);
+          console.log("ESOV sc balance: " + soldTokensSC);
+          console.log("ESOV Wallet balance: " + leftTokens);
+          
+          
+          console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
+          
+         
+          //let blockDuration = await dutch.WAITING_PERIOD();
+          //const start = parseInt((new Date()).getTime() / 1000);
+          //let end = start + blockDuration ;
+          //await time.increaseTo(end);
+          await expectRevert(
+            dutch.claimTokens({from: investor1}),
+            "Contract not in expected stage"
+          );
+          
+          await dutch.saleClosure(true, { from: esovAdmin });
+          
+          const investor1Bids = await dutch.bids(investor1);
+          const investor1ESOVAmount = (investor1Bids * (10**18))/calcPriceFinal;
+          console.log("investor1ESOVAmount: " + investor1ESOVAmount);
+          
+          await dutch.claimTokens({from: investor1});
+          const investor1ESOVBal = await token.balanceOf(investor1)
+          assert(investor1ESOVBal == investor1ESOVAmount);
+          console.log( "investor1 ESOV bal: " + await token.balanceOf(investor1));
+          console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
+      
+        // Cannot claimTokens twice
+          await expectRevert(
+            dutch.claimTokens({from: investor1}),
+            "Not eligable to receive tokens"
+          );
+      
+          const investor2Bids = await dutch.bids(investor2);
+          const investor2ESOVAmount = (investor2Bids * (10**18))/calcPriceFinal;
+          console.log("investor2ESOVAmount: " + investor2ESOVAmount);
+      
+          await dutch.claimTokens({from: investor2});
+          const investor2ESOVBal = await token.balanceOf(investor2);
+          //assert(investor2ESOVBal == investor2ESOVAmount);
+          console.log( "investor2 ESOV bal: " + await token.balanceOf(investor2));
+          console.log("investor2 ESOV SC bal: "+ await dutch.bids(investor2));
+      
+          console.log(await dutch.isFloorPrice());
+        });
+        */
+    });
+  });
+
+});
+/////////////////////////////////////////////
+
 
   /*// bid() - RBTC deposit
   describe("bid NOT on correct Stage", () => {
@@ -282,9 +789,9 @@ contract('DutchAuction', (accounts) => {
       console.log("total received: "+ await dutch.totalReceived());
             
 
-      let duration = 100000;
+      let blockDuration = 100000;
       const start = parseInt((new Date()).getTime() / 1000);
-      let end = start + duration ;
+      let end = start + blockDuration ;
 
       await time.increaseTo(end);
       tprice = await dutch.calcTokenPrice();
@@ -297,113 +804,25 @@ contract('DutchAuction', (accounts) => {
     });
   });
 */
-// bidEBTC - ERC20 (BTC wrapper) deposit
-  describe("bidEBTC NOT on correct Stage", () => {
-    it('should NOT send bidEBTC if not on AuctionStarted stage', async () => {
-      await dutch.setup(tokenAddr, esovAdmin, { from: owner });
-      let bidAmount = web3.utils.toWei('1');
-      await expectRevert(
-        dutch.bidEBTC(investor2, bidAmount, WBTC, {from: investor2}),
-        "Contract not in expected stage"
-      );
-    })
-  });
 
-  describe("bidEBTC onStage", () => {
-    beforeEach(async () => {
-      await dutch.setup(tokenAddr, esovAdmin, { from: owner });
-      await dutch.startAuction({ from: esovAdmin });
-      currentStage =await dutch.stage();
-      assert(currentStage.toNumber() === 2);
-      console.log(currentStage.toNumber());
-    });  
-    
-    it('should NOT send bidEBTC if not allowed token deposit', async () => {
-      await dutch.removeToken([WBTC], { from: esovAdmin });
-      let allowedToken = await dutch.allowedTokens(WBTC);
-      console.log("WBTC is allowed? " + allowedToken.tokenAddress);
-
-      let bidAmount = web3.utils.toWei('1');
-
-      await expectRevert(
-        dutch.bidEBTC(investor2, bidAmount, WBTC, {from: investor2}),
-        "this token is not Allowed"
-      );
-    });
-
-    it('Full flow send bidEBTC, end sale, claim ESOV', async () => {
-      
-  
-      let tprice = await dutch.calcTokenPrice();
-      console.log("t0 price: " + tprice); 
-      
-      let allowedArray = [];
-      
-      let allowedToken = await dutch.allowedTokens(WBTC);
-      console.log("WBTC is allowed? " + allowedToken.tokenAddress);
-      allowedToken = await dutch.allowedTokens(SBTC);
-      console.log("SBTC is allowed? " + allowedToken.tokenAddress);
-      
-      let bidAmount = web3.utils.toWei('1');
-      console.log("investor1 SBTC balance: " + await sbtc.balanceOf(investor1));
-      console.log("investor1 WBTC balance: " + await wbtc.balanceOf(investor1));
-      console.log("investor2 SBTC balance: " + await sbtc.balanceOf(investor2));
-      console.log("investor2 wBTC balance: " + await wbtc.balanceOf(investor2));
-
-      
-      let amount = await dutch.bidEBTC(investor1, bidAmount, WBTC, {from: investor1});
-      console.log("investor1 WBTC balance: " + await wbtc.balanceOf(investor1));
-      console.log("total received: "+ await dutch.totalReceived());
-      console.log("total WBTC sent to wallet: " + await wbtc.balanceOf(sovrynAddress));
-      amount = await dutch.bidEBTC(investor1, bidAmount, SBTC, {from: investor1});
-      console.log("investor1 SBTC balance: " + await sbtc.balanceOf(investor1));
-      console.log("total received: "+ await dutch.totalReceived());      
-      console.log("total SBTC sent to wallet: " + await sbtc.balanceOf(sovrynAddress));
-/*
-      let duration = 100000;
+      /*
+      let blockDuration = 100000;
       const start = parseInt((new Date()).getTime() / 1000);
-      let end = start + duration ;
+      let end = start + blockDuration ;
 
       await time.increaseTo(end);
       tprice = await dutch.calcTokenPrice();
       console.log("t1 price: " + tprice); 
 */
-      bidAmount = web3.utils.toWei('0.5');
-      amount = await dutch.bidEBTC(investor2, bidAmount, WBTC, {from: investor2});
-      console.log("investor2 WBTC balance: " + await wbtc.balanceOf(investor2));
-      console.log("total received: "+ await dutch.totalReceived());  
-      console.log("total WBTC sent to wallet: " + await wbtc.balanceOf(sovrynAddress));
+ 
 
-      console.log("bal of ducth sc: " + await wbtc.balanceOf(dutch.address));
-      console.log("bal of ducth sc: " + await sbtc.balanceOf(dutch.address));
-      //console.log("reimburse amount: " + await dutch.reImburse());
-      //console.log("maxWei amount: " + await dutch.maxWei());
-      console.log("ESOV owner balance: " + await token.balanceOf(esovAdmin));
-      console.log("ESOV sc balance: " + await token.balanceOf(dutchAddress));
-      console.log("ESOV Wallet balance: " + await token.balanceOf(sovrynAddress));
-      console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
 
-      //let duration = await dutch.WAITING_PERIOD();
-      //const start = parseInt((new Date()).getTime() / 1000);
-      //let end = start + duration ;
-      //await time.increaseTo(end);
-      await expectRevert(
-        dutch.claimTokens({from: investor1}),
-        "Contract not in expected stage"
-      );
-      
-      await dutch.saleClosure(true, { from: esovAdmin });
-      await dutch.claimTokens({from: investor1});
-      console.log( "investor1 ESOV bal: " + await token.balanceOf(investor1));
-      console.log("investor1 ESOV SC bal: "+ await dutch.bids(investor1));
-    });
-  });
-
+  /////////////////////////////////////
   /*describe("claimTokens", () => {
     it('should claimTokens', async () => {
-      let duration = await dutch.WAITING_PERIOD();
+      let blockDuration = await dutch.WAITING_PERIOD();
       const start = parseInt((new Date()).getTime() / 1000);
-      let end = start + duration ;
+      let end = start + blockDuration ;
 
       await time.increaseTo(end);
       
@@ -411,13 +830,13 @@ contract('DutchAuction', (accounts) => {
       //owner = esovAdmin;
       let bidAmount = web3.utils.toWei('1');
       await expectRevert(
-        dutch.bidEBTC(investor2, bidAmount, WBTC, {from: investor2}),
+        dutch.bidEBTC(investor2, bidAmount, sbtc, {from: investor2}),
         "Contract not in expected stage"
       );
     })
   });
 */
-});
+//});
 
 /*
   beforeEach (async () => {
@@ -438,11 +857,11 @@ contract('DutchAuction', (accounts) => {
 
   describe("set Admins", () => {
     it('should NOT start the CrowdSale because admins not set', async () => {
-      const duration = 100;
+      const blockDuration = 100;
       const rate = 2;
       let crowdsalesupply = web3.utils.toWei('200');
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: owner}), 
+        crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: owner}), 
         'setAdmins before start'
       );
     });  
@@ -467,7 +886,7 @@ contract('DutchAuction', (accounts) => {
       
       crowdsalesupply = web3.utils.toWei('301');
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: owner}), 
+        crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: owner}), 
         'crowdSaleSupply should be <= totalSupply'
       );
     });
@@ -475,15 +894,15 @@ contract('DutchAuction', (accounts) => {
       await token.setSaleAdmin(saleAddress,{ from: csovAdmin });
       crowdsalesupply = web3.utils.toWei('50');
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: accounts[2]}),
-        'Ownable: caller is not the owner'
+        crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: accounts[2]}),
+        'Ownable: caller is not the owner.'
       );
     });
     it('should NOT start if miPurchase == 0', async () => {
       await token.setSaleAdmin(saleAddress,{ from: csovAdmin });
       let minpurchaseNA = 0;
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchaseNA, crowdsalesupply, {from: owner}),
+        crowdsale.start(blockDuration, rate, minpurchaseNA, crowdsalesupply, {from: owner}),
         '_minPurchase should be > 0'
       );
     });
@@ -491,15 +910,15 @@ contract('DutchAuction', (accounts) => {
       await token.setSaleAdmin(saleAddress,{ from: csovAdmin });
       minpurchaseNA = web3.utils.toWei('51');
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchaseNA, crowdsalesupply, {from: owner}),
+        crowdsale.start(blockDuration, rate, minpurchaseNA, crowdsalesupply, {from: owner}),
         '_minPurchase should be < crowdSaleSupply'
       );
     });
     it('should Fail start after successful start', async () => {
       await token.setSaleAdmin(saleAddress, { from: csovAdmin });
-      await crowdsale.start(duration, rate, minpurchase, crowdsalesupply, { from: owner });
+      await crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, { from: owner });
       await expectRevert(
-        crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: owner}),
+        crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: owner}),
         'Sale should not be active'
       );
     });
@@ -511,8 +930,8 @@ contract('DutchAuction', (accounts) => {
       crowdsalesupply = web3.utils.toWei('5');
   const start = parseInt((new Date()).getTime() / 1000);
 //  time.increaseTo(start +5);
-      await crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: owner}); 
-  const expectedEnd = start + duration ;
+      await crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: owner}); 
+  const expectedEnd = start + blockDuration ;
   const end = await crowdsale.end();
       
       console.log("expectedEnd:  " + expectedEnd);
@@ -546,7 +965,7 @@ contract('DutchAuction', (accounts) => {
    //   start = parseInt((new Date()).getTime() / 1000);
    //   time.increaseTo(start);
       await token.setSaleAdmin(saleAddress,{ from: csovAdmin }); 
-      await crowdsale.start(duration, rate, minpurchase, crowdsalesupply, {from: owner});
+      await crowdsale.start(blockDuration, rate, minpurchase, crowdsalesupply, {from: owner});
     });
     describe("BUY", () => {
     
@@ -827,7 +1246,7 @@ contract('DutchAuction', (accounts) => {
           
           await expectRevert(
             crowdsale.withdrawTokens({ from: holder1 }),
-            'Ownable: caller is not the owner'
+            'Ownable: caller is not the owner.'
           );
       });
         
@@ -837,11 +1256,11 @@ contract('DutchAuction', (accounts) => {
           
           await expectRevert(
             crowdsale.withdrawFunds({ from: holder1 }),
-            'Ownable: caller is not the owner'
+            'Ownable: caller is not the owner.'
           );
       });
       
-      it('Should NOT Withdraw Funds before sale is done', async () => {
+      it('Should NOT Withdraw Funds before sale should be 0x0:sync () => {
         const amount1 = web3.utils.toBN(web3.utils.toWei('0.2'));
         await crowdsale.buy({ from: holder1, value: amount1 });
         
@@ -851,7 +1270,7 @@ contract('DutchAuction', (accounts) => {
         );
       });
 
-      it('Should NOT Withdraw Tokens before sale is done', async () => {
+      it('Should NOT Withdraw Tokens before sale should be 0x0:sync () => {
         const amount1 = web3.utils.toBN(web3.utils.toWei('0.2'));
         await crowdsale.buy({ from: holder1, value: amount1 });
         
