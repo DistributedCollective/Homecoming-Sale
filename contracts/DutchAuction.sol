@@ -1,50 +1,52 @@
 pragma solidity 0.6.2;
 import "./ESOVToken.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 //import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/IERC20.sol";
 
 /// @title Dutch auction contract - distribution of Gnosis tokens using an auction.
 /// @author Stefan George - <stefan.george@consensys.net>
-contract DutchAuction {
+contract DutchAuction is Ownable {
+    using SafeMath for uint256;
     /*
      *  Events
      */
     event BidSubmission(address indexed sender, uint256 amount);
 
-    // changePooh
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
-
     /*
      *  Constants
      */
-    uint256 public constant MAX_TOKENS_SOLD = 9000000 * 10**18; // 9M
-    uint256 public constant WAITING_PERIOD = 7 days;
+    uint256 public constant MAX_TOKENS_SOLD = 2000000 * 10**18; // 2M
+    //uint256 public constant WAITING_PERIOD = 7 days;
+    uint256 public constant WAITING_PERIOD = 1; ///testing
 
     /*
      *  Storage
      */
     // PragmaChangePooh
-    ESOVToken public gnosisToken;
-    //Token public gnosisToken;
+    ESOVToken public sovrynToken;
     address payable public wallet;
-    address payable public owner;
+    // address payable public owner;
     // wei deposits ceiling for the Auction
     uint256 public ceiling;
-    uint256 public priceFactor;
+    // Parameters for calcTokenPrice() equation
+    uint256 public priceFactorNumerator;
+    uint256 public priceFactorDenominator;
+    uint256 public priceConst;
+
     uint256 public startBlock;
-    uint256 public endTime;
+    uint256 public endBlock;
     // wei received
     uint256 public totalReceived;
     uint256 public finalPrice;
     mapping(address => uint256) public bids;
     Stages public stage;
-
-    // ChangePooh add ERC20 deposits
-    bytes32[] public tokenList;
+    bool public saleEnded;
+    uint256 public blockDuration;
+    //bool public isFloorPrice;
+    //uint256 public floorPrice;
 
     struct AllowedToken {
         bytes32 ticker;
@@ -67,58 +69,31 @@ contract DutchAuction {
      *  Modifiers
      */
     modifier atStage(Stages _stage) {
-        // PragmaChangePooh
-        require(stage == _stage, "Contract not in expected state");
+        require(stage == _stage, "Contract not in expected stage");
         _;
-        //if (stage != _stage)
-        //    // Contract not in expected state
-        //    throw;
-        //_;
     }
 
-    modifier isOwner() {
-        // PragmaChangePooh
-        require(msg.sender == owner, "Only owner is allowed to proceed");
-        _;
-        //if (msg.sender != owner)
-        //    // Only owner is allowed to proceed
-        //    throw;
-        //_;
-    }
-
-    // changePooh wallet actions are replaced with owner actions
-    /*    modifier isWallet() {
-        // PragmaChangePooh
-        require(msg.sender == wallet, "Only wallet is allowed to proceed");
-        _;
-        //if (msg.sender != wallet)
-        //    // Only wallet is allowed to proceed
-        //    throw;
-        //_;
-   }
-*/
-    // PragmaChangePooh - starting from solc 0.5: short data attack reverts automatically
-    /*    modifier isValidPayload() {
-        if (msg.data.length != 4 && msg.data.length != 36)
-            throw;
-        _;
-    }
-*/
     modifier timedTransitions() {
+        //if (
+        //    stage == Stages.AuctionStarted &&
+        //    ((calcTokenPrice() <= calcStopPrice()) ||
+        //        block.timestamp >= endBlock ||
+        //        calculatedPrice() == floorPrice)
+        //) finalizeAuction();
         if (
             stage == Stages.AuctionStarted &&
-            calcTokenPrice() <= calcStopPrice()
+            ((calcTokenPrice() <= calcStopPrice()) || block.number >= endBlock)
         ) finalizeAuction();
-        if (stage == Stages.AuctionEnded && now > endTime + WAITING_PERIOD)
+
+        if (stage == Stages.AuctionEnded && saleEnded)
             stage = Stages.TradingStarted;
         _;
     }
 
-    // ChangePooh add ERC20 deposits
     modifier tokenExist(bytes32 ticker) {
         require(
             allowedTokens[ticker].tokenAddress != address(0),
-            "this token does not Allowed"
+            "this token is not Allowed"
         );
         _;
     }
@@ -127,97 +102,99 @@ contract DutchAuction {
      *  Public functions
      */
     /// @dev Contract constructor function sets owner.
-    /// @param _wallet Gnosis wallet.
+    /// @param _wallet Sovryn wallet.
     /// @param _ceiling Auction ceiling.
-    /// @param _priceFactor Auction price factor.
+    /// @param _priceFactorNumerator Auction price Factor Numerator.
+    /// @param _priceFactorDenominator Auction price Factor Denominator.
+    /// @param _priceConst Auction price Factor Denominator.
     constructor(
         address payable _wallet,
         uint256 _ceiling,
-        uint256 _priceFactor
+        uint256 _priceFactorNumerator,
+        uint256 _priceFactorDenominator,
+        uint256 _priceConst,
+        uint256 _blockDuration
     ) public {
-        // PragmaChangePooh
         require(
-            _wallet != address(0) || _ceiling != 0 || _priceFactor != 0,
+            _wallet != address(0) ||
+                _ceiling != 0 ||
+                _priceFactorNumerator != 0 ||
+                _priceFactorDenominator != 0 ||
+                _priceConst != 0 ||
+                _blockDuration != 0,
             "Arguments are null"
         );
-        //if (_wallet == 0 || _ceiling == 0 || _priceFactor == 0)
-        //    // Arguments are null.
-        //    throw;
 
-        owner = msg.sender;
         wallet = _wallet;
         ceiling = _ceiling;
-        priceFactor = _priceFactor;
+        blockDuration = _blockDuration;
+        // Parameters for calcTokenPrice() equation
+        priceFactorNumerator = _priceFactorNumerator;
+        priceFactorDenominator = _priceFactorDenominator;
+        priceConst = _priceConst;
+        //floorPrice = _floorPrice;
+
         stage = Stages.AuctionDeployed;
-        OwnershipTransferred(address(0), owner);
     }
 
-    // ChangePooh add ERC20 deposits
     function addToken(bytes32[] memory ticker, address[] memory tokenAddress)
         public
-        isOwner
+        onlyOwner
     {
-        for (uint256 i = 0; i < ticker.length - 1; i++) {
+        for (uint256 i = 0; i < ticker.length; i++) {
             allowedTokens[ticker[i]] = AllowedToken(ticker[i], tokenAddress[i]);
-            tokenList.push(ticker[i]);
         }
     }
 
-    // changePooh
-    /// @dev changeOwner.
-    /// @param _newOwner .
-    function changeOwner(address payable _newOwner) public isOwner {
-        address prevOwner = owner;
-        owner = _newOwner;
-        OwnershipTransferred(prevOwner, owner);
+    function removeToken(bytes32[] memory ticker) public onlyOwner {
+        for (uint256 i = 0; i < ticker.length; i++) {
+            allowedTokens[ticker[i]] = AllowedToken(ticker[i], address(0));
+        }
     }
 
     /// @dev Setup function sets external contracts' addresses.
-    /// @param _gnosisToken Gnosis token address.
-    function setup(address _gnosisToken)
+    /// @param _sovrynToken Sovryn token address.
+    /// @param _esovAdmin New owner.
+
+    function setup(address _sovrynToken, address payable _esovAdmin)
         public
-        isOwner
+        onlyOwner
         atStage(Stages.AuctionDeployed)
     {
-        // PragmaChangePooh
-        require(_gnosisToken != address(0), "Argument is null");
-        //if (_gnosisToken == 0)
-        //    // Argument is null.
-        //    throw;
-        // PragmaChangePooh
-        gnosisToken = ESOVToken(_gnosisToken);
-        //gnosisToken = Token(_gnosisToken);
-        // Validate token balance
-
-        //if (gnosisToken.balanceOf(this) != MAX_TOKENS_SOLD)
-        //    throw;
+        require(_sovrynToken != address(0), "Argument is null");
+        sovrynToken = ESOVToken(_sovrynToken);
+        transferOwnership(_esovAdmin);
         stage = Stages.AuctionSetUp;
     }
 
     /// @dev Starts auction and sets startBlock.
-    function startAuction()
-        public
-        // changePooh  The owner and not the vault starts the auction
-        isOwner
-        //  isWallet
-        atStage(Stages.AuctionSetUp)
-    {
+    function startAuction() public onlyOwner atStage(Stages.AuctionSetUp) {
         stage = Stages.AuctionStarted;
         startBlock = block.number;
+        endBlock = blockDuration.add(startBlock);
     }
 
     /// @dev Changes auction ceiling and start price factor before auction is started.
     /// @param _ceiling Updated auction ceiling.
-    /// @param _priceFactor Updated start price factor.
-    function changeSettings(uint256 _ceiling, uint256 _priceFactor)
-        public
-        // changePooh  The owner and not the vault changes setting
-        isOwner
-        //  isWallet
-        atStage(Stages.AuctionSetUp)
-    {
+    /// @param _priceFactorNumerator Auction price Factor Numerator.
+    /// @param _priceFactorDenominator Auction price Factor Denominator.
+    // pooh adjust calcTokenPrice() equation
+    //function changeSettings(uint256 _ceiling, uint256 _priceFactor)
+    function changeSettings(
+        uint256 _ceiling,
+        uint256 _priceFactorNumerator,
+        uint256 _priceFactorDenominator,
+        uint256 _priceConst,
+        uint256 _blockDuration
+    ) public onlyOwner atStage(Stages.AuctionSetUp) {
         ceiling = _ceiling;
-        priceFactor = _priceFactor;
+        // Parameters for calcTokenPrice() equation
+        priceFactorNumerator = _priceFactorNumerator;
+        priceFactorDenominator = _priceFactorDenominator;
+        priceConst = _priceConst;
+        //floorPrice = _floorPrice;
+        // max blockDuration of the sale
+        blockDuration = _blockDuration;
     }
 
     /// @dev Calculates current token price.
@@ -234,25 +211,16 @@ contract DutchAuction {
         return stage;
     }
 
+    /* RBTC deposit
     /// @dev Allows to send a bid to the auction.
-    /// @param receiver Bid will be assigned to this address if set.
-    function bid(address payable receiver)
+    ///  receiver Bid will be assigned to this address if set.
+    function bid()
         public
         payable
-        // PragmaChangePooh - starting from solc 0.5: short data attack reverts automatically
-        //        isValidPayload
         timedTransitions
         atStage(Stages.AuctionStarted)
         returns (uint256 amount)
     {
-        // If a bid is done on behalf of a user via ShapeShift, the receiver address is set.
-        // PragmaChangePooh
-        if (receiver == address(0)) {
-            receiver = msg.sender;
-        }
-        //if (receiver == 0)
-        //    receiver = msg.sender;
-
         amount = msg.value;
         // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
         uint256 maxWei =
@@ -263,32 +231,23 @@ contract DutchAuction {
         // Only invest maximum possible amount.
         if (amount > maxWei) {
             amount = maxWei;
-            // Send change back to receiver address. In case of a ShapeShift bid the user receives the change back directly.
-
             // PragmaChangePooh
-            require(receiver.send(msg.value - amount), "Sending failed");
+            msg.sender.transfer(msg.value - amount);
+            //require(msg.sender.send(msg.value - amount), "Sending failed");
             //    if (!receiver.send(msg.value - amount))
             //        // Sending failed
             //        throw;
         }
 
         // Forward funding to ether wallet
+        wallet.transfer(amount);
 
-        // PragmaChangePooh
-        require(
-            amount != 0 && !wallet.send(amount),
-            "No amount sent or sending failed"
-        );
-        //    if (amount == 0 || !wallet.send(amount))
-        // No amount sent or sending failed
-        //    throw;
-
-        bids[receiver] += amount;
+        bids[msg.sender] += amount;
         totalReceived += amount;
         if (maxWei == amount)
             // When maxWei is equal to the big amount the auction is ended and finalizeAuction is triggered.
             finalizeAuction();
-        BidSubmission(receiver, amount);
+        BidSubmission(msg.sender, amount);
     }
 
     // ChangePooh add ERC20 BTC deposits
@@ -296,6 +255,12 @@ contract DutchAuction {
     /// @param receiver Bid will be assigned to this address if set.
     /// @param amountEBTC Amount of ERC20 BTC units of wei.
     /// @param tickerEBTC Ticker of ERC20 BTC.
+
+    //Pooh added for debug
+    //uint256 public maxWei;
+    //uint256 public reImburse;
+*/
+    // ERC20 btc wrappers tokens deposit
     function bidEBTC(
         address payable receiver,
         uint256 amountEBTC,
@@ -304,9 +269,9 @@ contract DutchAuction {
         external
         payable
         tokenExist(tickerEBTC)
-        timedTransitions
         atStage(Stages.AuctionStarted)
-        returns (uint256 amount)
+        timedTransitions
+        returns (uint256 actualAmount)
     {
         address tokenDeposit = allowedTokens[tickerEBTC].tokenAddress;
         IERC20(tokenDeposit).transferFrom(
@@ -314,65 +279,110 @@ contract DutchAuction {
             address(this),
             amountEBTC
         );
+        // Auction has ended during this block - full reimburse
+        if (stage == Stages.AuctionEnded) {
+            require(
+                IERC20(tokenDeposit).transfer(receiver, amountEBTC),
+                "Reimburse failed"
+            );
+            return 0;
+        } else {
+            // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
+            //uint256 maxWei =
+            uint256 maxWei =
+                ((MAX_TOKENS_SOLD.div(10**18)).mul(calcTokenPrice())).sub(
+                    totalReceived
+                );
+            uint256 maxWeiBasedOnTotalReceived = ceiling.sub(totalReceived);
+            if (maxWeiBasedOnTotalReceived < maxWei)
+                maxWei = maxWeiBasedOnTotalReceived;
 
-        //amount = msg.value;
-        // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
-        uint256 maxWei =
-            (MAX_TOKENS_SOLD / 10**18) * calcTokenPrice() - totalReceived;
-        uint256 maxWeiBasedOnTotalReceived = ceiling - totalReceived;
-        if (maxWeiBasedOnTotalReceived < maxWei)
-            maxWei = maxWeiBasedOnTotalReceived;
+            // Only invest maximum possible amount.
+            if (amountEBTC > maxWei) {
+                uint256 reImburse = amountEBTC.sub(maxWei);
+                amountEBTC = maxWei;
+                require(
+                    IERC20(tokenDeposit).transfer(receiver, reImburse),
+                    "Reimburse failed"
+                );
+            }
 
-        // Only invest maximum possible amount.
-        if (amountEBTC > maxWei) {
-            uint256 reImburse = amountEBTC - maxWei;
-            amountEBTC = maxWei;
-            require(IERC20(tokenDeposit).transfer(receiver, reImburse));
+            // Forward funding to vault wallet
+            require(amountEBTC != 0);
+            require(
+                IERC20(tokenDeposit).transfer(wallet, amountEBTC),
+                "Deposit to Vault failed"
+            );
+
+            bids[receiver] = bids[receiver].add(amountEBTC);
+            totalReceived = totalReceived.add(amountEBTC);
+            if (maxWei == amountEBTC)
+                // When maxWei is equal to thSe big amount the auction is ended and finalizeAuction is triggered.
+                finalizeAuction();
+            BidSubmission(receiver, amountEBTC);
+            actualAmount = amountEBTC;
+            return actualAmount;
         }
-
-        // Forward funding to vault wallet
-        require(amountEBTC != 0);
-        require(
-            IERC20(tokenDeposit).transfer(wallet, amountEBTC),
-            "Deposit to Vault failed"
-        );
-
-        bids[receiver] += amountEBTC;
-        totalReceived += amountEBTC;
-        if (maxWei == amountEBTC)
-            // When maxWei is equal to the big amount the auction is ended and finalizeAuction is triggered.
-            finalizeAuction();
-        BidSubmission(receiver, amountEBTC);
     }
 
     /// @dev Claims tokens for bidder after auction.
-    /// @param receiver Tokens will be assigned to this address if set.
-    function claimTokens(address receiver)
+    ///  receiver Tokens will be assigned to this address if set.
+    function claimTokens()
         public
-        // PragmaChangePooh - starting from solc 0.5: short data attack reverts automatically
-        //        isValidPayload
         timedTransitions
         atStage(Stages.TradingStarted)
     {
-        // PragmaChangePooh
-        if (receiver == address(0))
-            //if (receiver == 0)
-            receiver = msg.sender;
+        address payable receiver = msg.sender;
+        require(bids[receiver] > 0, "Not eligable to receive tokens");
         uint256 tokenCount = (bids[receiver] * 10**18) / finalPrice;
         bids[receiver] = 0;
-        gnosisToken.transfer(receiver, tokenCount);
+        sovrynToken.transfer(receiver, tokenCount);
     }
 
     /// @dev Calculates stop price.
     /// @return Returns stop price.
     function calcStopPrice() public view returns (uint256) {
-        return (totalReceived * 10**18) / MAX_TOKENS_SOLD + 1;
+        return ((totalReceived.mul(10**18)).div(MAX_TOKENS_SOLD)).add(1);
     }
 
     /// @dev Calculates token price.
     /// @return Returns token price.
-    function calcTokenPrice() public view returns (uint256) {
-        return (priceFactor * 10**18) / (block.number - startBlock + 7500) + 1;
+    function calcTokenPrice() public returns (uint256) {
+        // return (priceFactor * 10**18) / (block.number - startBlock + 7500) + 1;
+        uint256 lastBlock;
+        if (block.number >= endBlock) {
+            lastBlock = endBlock;
+        } else {
+            lastBlock = block.number;
+        }
+        uint256 calculatedPrice =
+            (
+                (priceFactorNumerator.mul(10**18)).div(
+                    (
+                        priceFactorDenominator.mul(
+                            ((lastBlock.sub(startBlock)).add(priceConst))
+                        )
+                    )
+                )
+            )
+                .add(1);
+        //if (calculatedPrice <= floorPrice) {
+        //    calculatedPrice = floorPrice;
+        //    isFloorPrice = true;
+        // }
+        return calculatedPrice;
+    }
+
+    /// @dev Close the sale after it has ended
+    /// @param _isSaleEnded - true to close the sale.
+    function saleClosure(bool _isSaleEnded)
+        external
+        onlyOwner()
+        atStage(Stages.AuctionEnded)
+    {
+        //ESOVToken tokenInstance = ESOVToken(token);
+        sovrynToken.saleClosure(_isSaleEnded);
+        saleEnded = _isSaleEnded;
     }
 
     /*
@@ -380,11 +390,13 @@ contract DutchAuction {
      */
     function finalizeAuction() private {
         stage = Stages.AuctionEnded;
-        if (totalReceived == ceiling) finalPrice = calcTokenPrice();
-        else finalPrice = calcStopPrice();
-        uint256 soldTokens = (totalReceived * 10**18) / finalPrice;
-        // Auction contract transfers all unsold tokens to Gnosis inventory multisig
-        gnosisToken.transfer(wallet, MAX_TOKENS_SOLD - soldTokens);
-        endTime = now;
+        //if (totalReceived == ceiling || block.number >= endBlock) {
+        if ((totalReceived == ceiling) || block.number >= endBlock) {
+            finalPrice = calcTokenPrice();
+        } else finalPrice = calcStopPrice();
+        uint256 soldTokens = (totalReceived.mul(10**18)).div(finalPrice);
+        // Auction contract transfers all unsold tokens to Sovryn inventory multisig
+        sovrynToken.transfer(wallet, MAX_TOKENS_SOLD.sub(soldTokens));
+        //endBlock = now;
     }
 }
