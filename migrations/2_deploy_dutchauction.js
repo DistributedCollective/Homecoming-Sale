@@ -36,6 +36,8 @@ async function deployDutch(deployer){
 // const priceFactorDenominator = '10000';
 // const priceConst = '8572';
 // const blockDuration = 20000;
+// const maxBid = web3.utils.toWei('1');
+
 /// Price param setup adjusted to start price @10000 sats per ESOV token,
 /// and reach floor price @3000 sats after 14 blocks
     const ceiling = web3.utils.toWei('200');
@@ -43,6 +45,7 @@ async function deployDutch(deployer){
     const priceFactorDenominator = '10000';
     const priceConst = '6';
     const blockDuration = 14;
+    const maxBid = web3.utils.toWei('1');
 
     console.log(
      "SovrynAddr: " + SovrynAddr + "  " +
@@ -50,7 +53,9 @@ async function deployDutch(deployer){
      "priceFactorNumerator: " + priceFactorNumerator + "   " +
      "priceFactorDenominator: " + priceFactorDenominator + "   " +
      "priceConst: " + priceConst + "   " +
-     "blockDuration: " + blockDuration);
+     "blockDuration: " + blockDuration + "   " +
+     "maxBid: " + maxBid);
+
     await deployer.deploy(
         DutchAuction,
         SovrynAddr,
@@ -58,7 +63,8 @@ async function deployDutch(deployer){
         priceFactorNumerator,
         priceFactorDenominator,
         priceConst,
-        blockDuration);
+        blockDuration,
+        maxBid);
     let dutch = await DutchAuction.deployed();
     dutchAddr = await dutch.address;
     console.log("DutchAuction address: " + dutchAddr);
