@@ -44,9 +44,16 @@ contract DutchAuction is Ownable {
     mapping(address => uint256) public bids;
     Stages public stage;
     bool public saleEnded;
-    uint256 public blockDuration;    
-    mapping(address => bool) public allowedTokens;
-    uint256 public maxBid;
+    uint256 public blockDuration;
+    //bool public isFloorPrice;
+    //uint256 public floorPrice;
+
+    struct AllowedToken {
+        bytes32 ticker;
+        address tokenAddress;
+    }
+    mapping(bytes32 => AllowedToken) public allowedTokens;
+
     /*
      *  Enums
      */
@@ -83,9 +90,9 @@ contract DutchAuction is Ownable {
         _;
     }
 
-    modifier tokenExist(address erc20Token) {
+    modifier tokenExist(bytes32 ticker) {
         require(
-            allowedTokens[erc20Token] == true,
+            allowedTokens[ticker].tokenAddress != address(0),
             "this token is not Allowed"
         );
         _;
@@ -106,8 +113,7 @@ contract DutchAuction is Ownable {
         uint256 _priceFactorNumerator,
         uint256 _priceFactorDenominator,
         uint256 _priceConst,
-        uint256 _blockDuration,
-        uint256 _maxBid
+        uint256 _blockDuration
     ) public {
         require(
             _wallet != address(0) ||
@@ -115,43 +121,41 @@ contract DutchAuction is Ownable {
                 _priceFactorNumerator != 0 ||
                 _priceFactorDenominator != 0 ||
                 _priceConst != 0 ||
-                _blockDuration != 0||
-                _maxBid != 0,
+                _blockDuration != 0,
             "Arguments are null"
         );
 
         wallet = _wallet;
         ceiling = _ceiling;
         blockDuration = _blockDuration;
-        maxBid = _maxBid;
         // Parameters for calcTokenPrice() equation
         priceFactorNumerator = _priceFactorNumerator;
         priceFactorDenominator = _priceFactorDenominator;
         priceConst = _priceConst;
+        //floorPrice = _floorPrice;
 
         stage = Stages.AuctionDeployed;
     }
 
-    function addToken(address[] memory _erc20Token)
+    function addToken(bytes32[] memory ticker, address[] memory tokenAddress)
         public
         onlyOwner
     {
-        for (uint256 i = 0; i < _erc20Token.length; i++) {
-            allowedTokens[_erc20Token[i]] = true;
+        for (uint256 i = 0; i < ticker.length; i++) {
+            allowedTokens[ticker[i]] = AllowedToken(ticker[i], tokenAddress[i]);
         }
     }
 
-    function removeToken(address[] memory _erc20Token) public onlyOwner {
-        for (uint256 i = 0; i < _erc20Token.length; i++) {
-            allowedTokens[_erc20Token[i]] = false;
+    function removeToken(bytes32[] memory ticker) public onlyOwner {
+        for (uint256 i = 0; i < ticker.length; i++) {
+            allowedTokens[ticker[i]] = AllowedToken(ticker[i], address(0));
         }
     }
 
-    /*
-    * @dev Setup function sets external contracts' addresses.
-    * @param _sovrynToken Sovryn token address.
-    * @param _esovAdmin New owner.
-    */
+    /// @dev Setup function sets external contracts' addresses.
+    /// @param _sovrynToken Sovryn token address.
+    /// @param _esovAdmin New owner.
+
     function setup(address _sovrynToken, address payable _esovAdmin)
         public
         onlyOwner
@@ -163,28 +167,25 @@ contract DutchAuction is Ownable {
         stage = Stages.AuctionSetUp;
     }
 
-    // @dev Starts auction and sets startBlock.
+    /// @dev Starts auction and sets startBlock.
     function startAuction() public onlyOwner atStage(Stages.AuctionSetUp) {
         stage = Stages.AuctionStarted;
         startBlock = block.number;
         endBlock = blockDuration.add(startBlock);
     }
 
-    /* @dev Changes auction ceiling and start price factor before auction is started.
-    * @param _ceiling Updated auction ceiling.
-    * @param _priceFactorNumerator Auction price Factor Numerator.
-    * @param _priceFactorDenominator Auction price Factor Denominator.
-    * @param _priceConst Auction price const.
-    * @param _blockDuration Auction blockDuration
-    */
-
+    /// @dev Changes auction ceiling and start price factor before auction is started.
+    /// @param _ceiling Updated auction ceiling.
+    /// @param _priceFactorNumerator Auction price Factor Numerator.
+    /// @param _priceFactorDenominator Auction price Factor Denominator.
+    // pooh adjust calcTokenPrice() equation
+    //function changeSettings(uint256 _ceiling, uint256 _priceFactor)
     function changeSettings(
         uint256 _ceiling,
         uint256 _priceFactorNumerator,
         uint256 _priceFactorDenominator,
         uint256 _priceConst,
-        uint256 _blockDuration,
-        uint256 _maxBid
+        uint256 _blockDuration
     ) public onlyOwner atStage(Stages.AuctionSetUp) {
         ceiling = _ceiling;
         // Parameters for calcTokenPrice() equation
@@ -194,19 +195,18 @@ contract DutchAuction is Ownable {
         //floorPrice = _floorPrice;
         // max blockDuration of the sale
         blockDuration = _blockDuration;
-        maxBid = _maxBid;
     }
 
-    // @dev Calculates current token price.
-    // @return Returns token price.
+    /// @dev Calculates current token price.
+    /// @return Returns token price.
     function calcCurrentTokenPrice() public timedTransitions returns (uint256) {
         if (stage == Stages.AuctionEnded || stage == Stages.TradingStarted)
             return finalPrice;
         return calcTokenPrice();
     }
 
-    // @dev Returns correct stage, even if a function with timedTransitions modifier has not yet been called yet.
-    // @return Returns current auction stage.
+    /// @dev Returns correct stage, even if a function with timedTransitions modifier has not yet been called yet.
+    /// @return Returns current auction stage.
     function updateStage() public timedTransitions returns (Stages) {
         return stage;
     }
@@ -264,16 +264,16 @@ contract DutchAuction is Ownable {
     function bidEBTC(
         address payable receiver,
         uint256 amountEBTC,
-        address _erc20Token
+        bytes32 tickerEBTC
     )
         external
         payable
-        tokenExist(_erc20Token)
+        tokenExist(tickerEBTC)
         atStage(Stages.AuctionStarted)
         timedTransitions
         returns (uint256 actualAmount)
     {
-        address tokenDeposit = _erc20Token;
+        address tokenDeposit = allowedTokens[tickerEBTC].tokenAddress;
         IERC20(tokenDeposit).transferFrom(
             msg.sender,
             address(this),
@@ -287,7 +287,6 @@ contract DutchAuction is Ownable {
             );
             return 0;
         } else {
-            uint256 reImburse;
             // Prevent that more than 90% of tokens are sold. Only relevant if cap not reached.
             //uint256 maxWei =
             uint256 maxWei =
@@ -299,24 +298,9 @@ contract DutchAuction is Ownable {
                 maxWei = maxWeiBasedOnTotalReceived;
 
             // Only invest maximum possible amount.
-            /*
-        
-            1. amountEBTC > maxBid  => reimburse = amountEBTC - maxBid  ;  amountEBTC = maxBid Continue Auction
-            2. amountEBTC > maxwei  => reimburse = amountEBTC - maxwei  ;  amountEBTC = maxwei  END Auction
-            3. amountEBTC < maxWei && amountEBTC < maxBid
-
-            */
-            if (amountEBTC > maxBid) {
-                reImburse = amountEBTC.sub(maxBid);
-                amountEBTC = maxBid;
-            }    
-            
             if (amountEBTC > maxWei) {
-                reImburse = reImburse.add(amountEBTC.sub(maxWei));
+                uint256 reImburse = amountEBTC.sub(maxWei);
                 amountEBTC = maxWei;
-            }
-
-            if (reImburse > 0){
                 require(
                     IERC20(tokenDeposit).transfer(receiver, reImburse),
                     "Reimburse failed"
