@@ -29,6 +29,13 @@ async function deployToken(deployer){
 }
 
 async function deployDutch(deployer){
+
+/// Mainnet setup: Starts at 10000sats, reaches 3000sats at 20K blocks (~week)
+// const ceiling = web3.utils.toWei('200');
+// const priceFactorNumerator = '8572';
+// const priceFactorDenominator = '10000';
+// const priceConst = '8572';
+// const blockDuration = 20000;
 /// Price param setup adjusted to start price @10000 sats per ESOV token,
 /// and reach floor price @3000 sats after 14 blocks
     const ceiling = web3.utils.toWei('200');

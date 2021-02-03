@@ -23,13 +23,11 @@ module.exports = async function (deployer) {
            ]));
     
     const amount = web3.utils.toWei('2');
-  // Declare a function that:
+  // seedTokenBalance()
   // 1. Faucet the trader account
+  // 2. Approve DutchAuction SC for token transfer.
   const seedTokenBalance = async (token, investor) => {
     await token.faucet(investor, amount, { from: esovAdmin });
-    //    let bal = 
-     //   console.log("investor1 SBTC balance: " + await token.balanceOf(investor1));
-     //   console.log(token + investor + )
         await token.approve(
             dutchAddress,
             amount,
