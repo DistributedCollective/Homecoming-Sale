@@ -4,17 +4,19 @@ const ESOVToken = artifacts.require("ESOVToken");
 const esovAdmin = '0x763e73385c790f2fe2354d877ff98431ee586e4e';  // account9 
 const SovrynAddr = '0xfa201a6fccbd9332a49ac71b646be88503dc6696'; // account8
 
-/*const adminWallet = '0xE8276A1680CB970c2334B3201044Ddf7c492F52A';
-const NFTs = ['0x78c0D49d003bf0A88EA6dF729B7a2AD133B9Ae25','0x420fECFda0975c49Fd0026f076B302064ED9C6Ff','0xC5452Dbb2E3956C1161cB9C2d6DB53C2b60E7805'];
-*/
+let dutchAddr;
+let ESOVAddress;
+
 module.exports = async function (deployer) {
     ESOVTokenInstance = await deployToken(deployer);
     dutch = await deployDutch(deployer);
-   // await CSOVTokenInstance.setSaleAdmin(crowdsale.address);
-   // console.log(
-   //     "Token Balance of crowdsale smart contract: " +
-   //      await CSOVTokenInstance.balanceOf(crowdsale.address));
-   // crowdsale.start(86400*3, 50000, web3.utils.toWei('0.001', 'ether'), web3.utils.toWei('2000000', 'ether'));
+    await ESOVTokenInstance.setSaleAdmin(dutch.address, {from: esovAdmin});
+    console.log(
+        "Token Balance of crowdsale smart contract: " +
+         await ESOVTokenInstance.balanceOf(dutch.address));
+    await dutch.setup(ESOVAddress, esovAdmin);
+    console.log("dutch owner: " + await dutch.owner());
+    console.log("ESOV owner: " + await ESOVTokenInstance.owner());
 }
 
 async function deployToken(deployer){
@@ -27,13 +29,38 @@ async function deployToken(deployer){
 }
 
 async function deployDutch(deployer){
-    const ceiling = 1000;
-    const priceFactor = 2;
-    
-    console.log("SovrynAddr: " + SovrynAddr + "  " + "ceiling: " + ceiling + "   " + "priceFactor: " + priceFactor)
-    await deployer.deploy(DutchAuction,SovrynAddr, ceiling, priceFactor);
+
+/// Mainnet setup: Starts at 10000sats, reaches 3000sats at 20K blocks (~week)
+// const ceiling = web3.utils.toWei('200');
+// const priceFactorNumerator = '8572';
+// const priceFactorDenominator = '10000';
+// const priceConst = '8572';
+// const blockDuration = 20000;
+/// Price param setup adjusted to start price @10000 sats per ESOV token,
+/// and reach floor price @3000 sats after 14 blocks
+    const ceiling = web3.utils.toWei('200');
+    const priceFactorNumerator = '6';
+    const priceFactorDenominator = '10000';
+    const priceConst = '6';
+    const blockDuration = 14;
+
+    console.log(
+     "SovrynAddr: " + SovrynAddr + "  " +
+     "ceiling: " + ceiling + "   " + 
+     "priceFactorNumerator: " + priceFactorNumerator + "   " +
+     "priceFactorDenominator: " + priceFactorDenominator + "   " +
+     "priceConst: " + priceConst + "   " +
+     "blockDuration: " + blockDuration);
+    await deployer.deploy(
+        DutchAuction,
+        SovrynAddr,
+        ceiling,
+        priceFactorNumerator,
+        priceFactorDenominator,
+        priceConst,
+        blockDuration);
     let dutch = await DutchAuction.deployed();
-    let dutchAddr = await dutch.address;
+    dutchAddr = await dutch.address;
     console.log("DutchAuction address: " + dutchAddr);
     return dutch;
 }

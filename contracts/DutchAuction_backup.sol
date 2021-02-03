@@ -48,12 +48,12 @@ contract DutchAuction is Ownable {
     //bool public isFloorPrice;
     //uint256 public floorPrice;
 
-    //struct AllowedToken {
-    //    bytes32 ticker;
-    //    address tokenAddress;
-   // }
-    //mapping(bool => AllowedToken) public allowedTokens;
-    mapping(address => bool) public allowedTokens;
+    struct AllowedToken {
+        bytes32 ticker;
+        address tokenAddress;
+    }
+    mapping(bytes32 => AllowedToken) public allowedTokens;
+
     /*
      *  Enums
      */
@@ -90,9 +90,9 @@ contract DutchAuction is Ownable {
         _;
     }
 
-    modifier tokenExist(address erc20Token) {
+    modifier tokenExist(bytes32 ticker) {
         require(
-            allowedTokens[erc20Token] == true,
+            allowedTokens[ticker].tokenAddress != address(0),
             "this token is not Allowed"
         );
         _;
@@ -137,18 +137,18 @@ contract DutchAuction is Ownable {
         stage = Stages.AuctionDeployed;
     }
 
-    function addToken(address[] memory _erc20Token)
+    function addToken(bytes32[] memory ticker, address[] memory tokenAddress)
         public
         onlyOwner
     {
-        for (uint256 i = 0; i < _erc20Token.length; i++) {
-            allowedTokens[_erc20Token[i]] = true;
+        for (uint256 i = 0; i < ticker.length; i++) {
+            allowedTokens[ticker[i]] = AllowedToken(ticker[i], tokenAddress[i]);
         }
     }
 
-    function removeToken(address[] memory _erc20Token) public onlyOwner {
-        for (uint256 i = 0; i < _erc20Token.length; i++) {
-            allowedTokens[_erc20Token[i]] = false;
+    function removeToken(bytes32[] memory ticker) public onlyOwner {
+        for (uint256 i = 0; i < ticker.length; i++) {
+            allowedTokens[ticker[i]] = AllowedToken(ticker[i], address(0));
         }
     }
 
@@ -264,16 +264,16 @@ contract DutchAuction is Ownable {
     function bidEBTC(
         address payable receiver,
         uint256 amountEBTC,
-        address _erc20Token
+        bytes32 tickerEBTC
     )
         external
         payable
-        tokenExist(_erc20Token)
+        tokenExist(tickerEBTC)
         atStage(Stages.AuctionStarted)
         timedTransitions
         returns (uint256 actualAmount)
     {
-        address tokenDeposit = _erc20Token;
+        address tokenDeposit = allowedTokens[tickerEBTC].tokenAddress;
         IERC20(tokenDeposit).transferFrom(
             msg.sender,
             address(this),
