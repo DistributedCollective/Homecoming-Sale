@@ -1,8 +1,8 @@
 const DutchAuction = artifacts.require("DutchAuction");
 const ESOVToken = artifacts.require("ESOVToken");
 
-const SovrynAddr = '0xFA201a6FcCBD9332a49Ac71b646be88503Dc6696';  // account9 
-const esovAdmin = '0x48597cE299524c9748f08df9B20D4e8b22270609'; // account8
+const esovAdmin = '0x763e73385c790f2fe2354d877ff98431ee586e4e';  // account9 
+const SovrynAddr = '0xfa201a6fccbd9332a49ac71b646be88503dc6696'; // account8
 
 let dutchAddr;
 let ESOVAddress;
