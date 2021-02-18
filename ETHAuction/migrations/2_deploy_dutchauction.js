@@ -1,8 +1,8 @@
 const DutchAuction = artifacts.require("DutchAuction");
 const ESOVToken = artifacts.require("ESOVToken");
 
-const SovrynAddr = '0xFA201a6FcCBD9332a49Ac71b646be88503Dc6696';  // account9 
-const esovAdmin = '0x48597cE299524c9748f08df9B20D4e8b22270609'; // account8
+const SovrynAddr = '0x87f887d843b06ae9d7d16de8099f4ab9d5da2c62';  // account9 
+const esovAdmin = '0xa9da8392e97fa8765b08bdbff6236e8be087958d'; // account8
 
 let dutchAddr;
 let ESOVAddress;
@@ -10,7 +10,10 @@ let ESOVAddress;
 module.exports = async function (deployer) {
     ESOVTokenInstance = await deployToken(deployer);
     dutch = await deployDutch(deployer);
-    await ESOVTokenInstance.setSaleAdmin(dutch.address, {from: esovAdmin});
+    //await ESOVTokenInstance.setSaleAdmin(dutch.address, {from: esovAdmin});
+    let totalBal = await ESOVTokenInstance.balanceOf(ESOVTokenInstance.address);
+    await ESOVTokenInstance.transfer(dutch.address, totalBal, {from: esovAdmin});
+
     console.log(
         "Token Balance of crowdsale smart contract: " +
          await ESOVTokenInstance.balanceOf(dutch.address));
