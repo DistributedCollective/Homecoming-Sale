@@ -1,4 +1,6 @@
-const { expectEvent, expectRevert, time, expect } = require('@openzeppelin/test-helpers');
+const { expectEvent, expectRevert, time, BN } = require('@openzeppelin/test-helpers');
+const { expect } = require('chai');
+
 const DutchAuction = artifacts.require('DutchAuction.sol');
 const ESOVToken = artifacts.require('ESOVToken.sol');
 const Wbtc = artifacts.require('mocks/WBTC.sol');
@@ -59,7 +61,8 @@ describe("Deploy DutchAuction contracts", () => {
       { from: owner });
     dutchAddress = await dutch.address;
 
-    await token.setSaleAdmin(dutchAddress, {from: esovAdmin});
+    //await token.setSaleAdmin(dutchAddress, totalSupply, {from: esovAdmin});
+    await token.transfer(dutchAddress, totalSupply, {from: esovAdmin});
     console.log("ESOV sc balance: " + await token.balanceOf(dutchAddress));
 
     ([wbtc, sbtc] = await Promise.all([
@@ -70,9 +73,21 @@ describe("Deploy DutchAuction contracts", () => {
     //await dutch.addToken([WBTC, SBTC], [wbtc.address, sbtc.address], { from: owner });
     await dutch.addToken([wbtc.address, sbtc.address], { from: owner });
 
-    wbtcAddr = wbtc.address;
-    sbtcAddr = sbtc.address;
+    wbtcAddr = await wbtc.address;
+    sbtcAddr = await sbtc.address;
+    let wbtcAddrString = wbtcAddr.toString();
+    let sbtcAddrString = sbtcAddr.toString();
+
+    let wbtcSCAddr = await dutch.tokensAddr(0);
+    let sbtcSCAddr = await dutch.tokensAddr(1);
+    let wbtcSCAddrString = wbtcSCAddr.toString();
+    let sbtcSCAddrString = sbtcSCAddr.toString();
     
+    let wbtcAddrCmp = wbtcSCAddrString.localeCompare(wbtcAddrString);
+    let sbtcAddrCmp = sbtcSCAddrString.localeCompare(sbtcAddrString);
+    assert(wbtcAddrCmp == 0);
+    assert(sbtcAddrCmp == 0);
+
   // seed amount per investor per ERC20-BTC
     const amount = web3.utils.toWei('200');
   // seedTokenBalance()
@@ -146,8 +161,10 @@ beforeEach (async () => {
       blockDuration,
       { from: owner });
     dutchAddress = await dutch.address;
-    await token.setSaleAdmin(dutchAddress, {from: esovAdmin});
-  
+    //await token.setSaleAdmin(dutchAddress, {from: esovAdmin});
+    await token.transfer(dutchAddress, totalSupply, {from: esovAdmin});
+    console.log("ESOV sc balance: " + await token.balanceOf(dutchAddress));
+
     ([wbtc, sbtc] = await Promise.all([
       Wbtc.new(),
       Sbtc.new()
@@ -280,11 +297,29 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
     });  
     
     it('should NOT send bidEBTC if not allowed token deposit', async () => {
-      //await dutch.removeToken([WBTC], { from: esovAdmin });
+      let wbtcSCAddrBF = await dutch.tokensAddr(0);
+      let sbtcSCAddrBF = await dutch.tokensAddr(1);
+      let wbtcSCAddrBFString = wbtcSCAddrBF.toString();
+      let sbtcSCAddrBFString = sbtcSCAddrBF.toString();
+      //console.log(wbtcSCAddrBF + "  " + sbtcSCAddrBF);
+
       await dutch.removeToken([wbtcAddr], { from: esovAdmin });
       let allowedToken = await dutch.allowedTokens(wbtcAddr);
       assert(!allowedToken);
       //console.log("wbtc Not allowed (should be 0x0): " + allowedToken);
+      
+      let sbtcSCAddrAF = await dutch.tokensAddr(0);
+      let wbtcSCAddrAF = await dutch.tokensAddr(1);
+      let sbtcSCAddrAFString = sbtcSCAddrAF.toString();
+      let wbtcSCAddrAFString = wbtcSCAddrAF.toString();
+       
+      let sbtcAddrCmp = sbtcSCAddrAFString.localeCompare(sbtcSCAddrBFString);
+      let wbtcAddrCmp = wbtcSCAddrAFString.localeCompare('0x0000000000000000000000000000000000000000');
+      
+      assert(sbtcAddrCmp == 0);
+      assert(wbtcAddrCmp == 0);
+
+      //console.log(wbtcSCAddrAF + "  " + sbtcSCAddrAF);
 
       let bidAmount = web3.utils.toWei('1');
       await expectRevert(
@@ -300,7 +335,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let tprice = await dutch.calcTokenPrice.call();
       console.log("t0 price: " + tprice); 
-          
+      
       let bidAmount = web3.utils.toWei('1.1');
     // Deposit 1: investor1 deposit wbtc
       blockNumber = await web3.eth.getBlockNumber();
@@ -310,14 +345,14 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
   
       let wbtcInvestor1BalanceBefore = await wbtc.balanceOf(investor1);
       let auctionTotalreceivedBefore = await dutch.totalReceived()
-      let walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+      let walletwbtcBefore = await wbtc.balanceOf(dutchAddress);
       
       let tx = await dutch.bidEBTC(investor1, bidAmount, wbtcAddr, {from: investor1});
       totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(bidAmount));
 
       let wbtcInvestor1BalanceAfter = await wbtc.balanceOf(investor1);
       let auctionTotalreceivedAfter = await dutch.totalReceived()
-      let walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+      let walletwbtcAfter = await wbtc.balanceOf(dutchAddress);
 
       expectEvent(tx, 'BidSubmission', {
         sender: investor1,
@@ -337,14 +372,14 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let sbtcInvestor1BalanceBefore = await sbtc.balanceOf(investor1);
       auctionTotalreceivedBefore = await dutch.totalReceived()
-      let walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+      let walletsbtcBefore = await sbtc.balanceOf(dutchAddress);
       
       tx = await dutch.bidEBTC(investor1, bidAmount, sbtcAddr, {from: investor1});
       totalReceivedTest  = totalReceivedTest.add(web3.utils.toBN(bidAmount));
 
       let sbtcInvestor1BalanceAfter = await sbtc.balanceOf(investor1);
       auctionTotalreceivedAfter = await dutch.totalReceived()
-      let walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+      let walletsbtcAfter = await sbtc.balanceOf(dutchAddress);
 
       expectEvent(tx, 'BidSubmission', {
         sender: investor1,
@@ -355,7 +390,12 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
              (auctionTotalreceivedAfter - auctionTotalreceivedBefore));
       assert((sbtcInvestor1BalanceBefore - sbtcInvestor1BalanceAfter) ==
              (walletsbtcAfter - walletsbtcBefore));         
-             
+      
+      await expectRevert(
+        dutch.withdrawDeposits({from: esovAdmin}),
+              'cannot withdraw before the sale ends'
+      );
+
     // Deposit 3: investor2 deposit sbtc - ceiling is reached,  0.2 reimbursed
       blockNumber = await web3.eth.getBlockNumber();
       console.log("block#: " + blockNumber);  
@@ -365,7 +405,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
       bidAmount = web3.utils.toWei('0.5');
       let sbtcInvestor2BalanceBefore = await sbtc.balanceOf(investor2);
       auctionTotalreceivedBefore = await dutch.totalReceived()
-      walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+      walletsbtcBefore = await sbtc.balanceOf(dutchAddress);
       
       tx = await dutch.bidEBTC(investor2, bidAmount, sbtcAddr, {from: investor2});
       totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(web3.utils.toWei('0.3')));
@@ -379,7 +419,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let sbtcInvestor2BalanceAfter = await sbtc.balanceOf(investor2);
       auctionTotalreceivedAfter = await dutch.totalReceived()
-      walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+      walletsbtcAfter = await sbtc.balanceOf(dutchAddress);
 
       expectEvent(tx, 'BidSubmission', {
         sender: investor2,
@@ -399,7 +439,26 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
         dutch.bidEBTC(investor2, bidAmount, sbtcAddr, {from: investor2}),
               'Contract not in expected stage.'
       );
+
     //
+    /// Need to complete assert for withdrawDeposits function
+    walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+    walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+    
+    dutch.withdrawDeposits({from: esovAdmin});
+
+    walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+    walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+    
+    console.log("walletsbtcBefore: " +  walletsbtcBefore);
+    console.log("walletwbtcBefore: " +  walletwbtcBefore);
+    console.log("walletsbtcAfter: " +  walletsbtcAfter);
+    console.log("walletwbtcAfter: " +  walletwbtcAfter);
+
+    console.log("walletsbtc: " +  (walletsbtcAfter - walletsbtcBefore));
+    console.log("walletwbtc: " +  (walletwbtcAfter - walletwbtcBefore));
+    assert('1400000000000000000' == (walletsbtcAfter - walletsbtcBefore));         
+    assert('1100000000000000000' == (walletwbtcAfter - walletwbtcBefore));         
 
     // Validate final price
       const totalReceived = await dutch.totalReceived();
@@ -429,7 +488,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
         "Contract not in expected stage"
       );
       
-      await dutch.saleClosure(true, { from: esovAdmin });
+      await dutch.saleClosure({ from: esovAdmin });
 
       console.log("investor1 ESOV SC bal: " + await dutch.bids(investor1));
       const investor1Bids = await dutch.bids(investor1);
@@ -447,17 +506,20 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
         dutch.claimTokens({from: investor1}),
         "Not eligable to receive tokens"
       );
-      
+
       console.log("investor2 ESOV SC bal: "+ await dutch.bids(investor2));
       const investor2Bids = await dutch.bids(investor2);
-      const investor2ESOVAmount = (investor2Bids * (10**18))/calcPriceFinal;
+      //const investor2ESOVAmount = web3.utils.toBN((investor2Bids * (10**18))/calcPriceFinal);
+      const investor2ESOVAmount = web3.utils.toBN(web3.utils.toWei(investor2Bids).div(calcPriceFinal));
       console.log("investor2ESOVAmount: " + investor2ESOVAmount);
 
       await dutch.claimTokens({from: investor2});
       const investor2ESOVBal = await token.balanceOf(investor2);
-      assert(investor2ESOVBal == investor2ESOVAmount);
       console.log( "investor2 ESOV bal: " + await token.balanceOf(investor2));
       console.log("investor2 ESOV SC bal: "+ await dutch.bids(investor2));
+      
+      expect(investor2ESOVBal).to.be.bignumber.equal(investor2ESOVAmount);
+      //assert(investor2ESOVBal == investor2ESOVAmount);
 
     });
   });
@@ -486,7 +548,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
       console.log("block#: " + blockNumber);  
       let tprice = await dutch.calcTokenPrice.call();
       console.log("t0 price: " + tprice);
-       
+    
       let bidAmount = web3.utils.toWei('1.1');
       
       // Deposit 1: investor1 deposit wbtc
@@ -505,14 +567,14 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let wbtcInvestor1BalanceBefore = await wbtc.balanceOf(investor1);
       let auctionTotalreceivedBefore = await dutch.totalReceived()
-      let walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+      let walletwbtcBefore = await wbtc.balanceOf(dutchAddress);
     
       let tx = await dutch.bidEBTC(investor1, bidAmount, wbtcAddr, { from: investor1 });
       totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(bidAmount));
 
       let wbtcInvestor1BalanceAfter = await wbtc.balanceOf(investor1);
       let auctionTotalreceivedAfter = await dutch.totalReceived()
-      let walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+      let walletwbtcAfter = await wbtc.balanceOf(dutchAddress);
 
       expectEvent(tx, 'BidSubmission', {
         sender: investor1,
@@ -610,7 +672,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let sbtcInvestor2BalanceBefore = await sbtc.balanceOf(investor2);
       auctionTotalreceivedBefore = await dutch.totalReceived()
-      walletsbtcBefore = await sbtc.balanceOf(sovrynAddress);
+      walletsbtcBefore = await sbtc.balanceOf(dutchAddress);
     
       console.log("sbtcInvestor2BalanceBefore: " + sbtcInvestor2BalanceBefore);
       console.log("auctionTotalreceivedBefore: " + auctionTotalreceivedBefore);
@@ -623,7 +685,7 @@ describe("bidEBTC onStage - deposit ceiling constraint path", () => {
 
       let sbtcInvestor2BalanceAfter = await sbtc.balanceOf(investor2);
       auctionTotalreceivedAfter = await dutch.totalReceived()
-      let walletsbtcAfter = await sbtc.balanceOf(sovrynAddress);
+      let walletsbtcAfter = await sbtc.balanceOf(dutchAddress);
 
       console.log("sbtcInvestor2BalanceAfter: " + sbtcInvestor2BalanceAfter);
       console.log("auctionTotalreceivedAfter: " + auctionTotalreceivedAfter);
@@ -697,7 +759,7 @@ describe("bidEBTC onStage - price equilibrium path", () => {
     console.log("block#: " + blockNumber);  
     let tprice = await dutch.calcTokenPrice.call();
     console.log("t0 price: " + tprice);
-     
+    
     let bidAmount = web3.utils.toWei('140');
     
     // Deposit 1: investor1 deposit wbtc
@@ -716,14 +778,14 @@ describe("bidEBTC onStage - price equilibrium path", () => {
 
     let wbtcInvestor1BalanceBefore = await wbtc.balanceOf(investor1);
     let auctionTotalreceivedBefore = await dutch.totalReceived()
-    let walletwbtcBefore = await wbtc.balanceOf(sovrynAddress);
+    let walletwbtcBefore = await wbtc.balanceOf(dutchAddress);
   
     let tx = await dutch.bidEBTC(investor1, bidAmount, wbtcAddr, { from: investor1 });
     totalReceivedTest = totalReceivedTest.add(web3.utils.toBN(bidAmount));
 
     let wbtcInvestor1BalanceAfter = await wbtc.balanceOf(investor1);
     let auctionTotalreceivedAfter = await dutch.totalReceived()
-    let walletwbtcAfter = await wbtc.balanceOf(sovrynAddress);
+    let walletwbtcAfter = await wbtc.balanceOf(dutchAddress);
 
     expectEvent(tx, 'BidSubmission', {
       sender: investor1,

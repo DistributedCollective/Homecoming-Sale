@@ -1,6 +1,6 @@
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 
-const fs = require("fs");
+const fs =  require("fs");
 const secrets = JSON.parse(
     fs.readFileSync(".secrets").toString().trim()
   );
@@ -25,7 +25,7 @@ module.exports = {
     contracts_build_directory: './build/contracts',
     test_directory: './test',
     networks: {
-        development: {
+        develop: {
             host: 'localhost',
             port: 7545,
             network_id: '*',
